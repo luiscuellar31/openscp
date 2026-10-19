@@ -446,7 +446,7 @@ void MainWindow::applyDisconnectLocalUiState() {
         actChooseRight_->setIcon(
             QIcon(QLatin1String(":/assets/icons/action-open-folder.svg")));
         actChooseRight_->setEnabled(true);
-        actChooseRight_->setToolTip(actChooseRight_->text());
+        actChooseRight_->setToolTip(actChooseRight_->iconText());
     }
     if (rightView_)
         openscpui::enableRestoringFocus(
@@ -511,7 +511,7 @@ bool MainWindow::runDisconnectTransferCleanupAsync(quint64 disconnectSeq) {
                         !self->rightIsRemote_) {
                         if (self->actConnect_)
                             self->actConnect_->setToolTip(
-                                self->actConnect_->text());
+                                self->actConnect_->iconText());
                         self->statusBar()->showMessage(
                             tr("Background transfer cleanup finished"), 3000);
                     }
@@ -639,7 +639,7 @@ void MainWindow::completeDisconnectRemote(quint64 disconnectSeq, bool forced) {
     resetConnectionSessionIndicators();
     if (actConnect_) {
         actConnect_->setEnabled(true);
-        actConnect_->setToolTip(actConnect_->text());
+        actConnect_->setToolTip(actConnect_->iconText());
     }
 
     // Per spec: non‑modal Site Manager after disconnect (if enabled), without

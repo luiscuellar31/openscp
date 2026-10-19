@@ -27,6 +27,7 @@
 #include <QInputDialog>
 #include <QItemSelectionModel>
 #include <QKeyEvent>
+#include <QKeySequence>
 #include <QMenu>
 #include <QMenuBar>
 #include <QMessageBox>
@@ -184,13 +185,48 @@ OPENSCP_TEST(testWindowsMenuBarHasNoApplicationMenu, test) {
             menu->actions().contains(automatic))
             updatesMenu = menu;
     }
-    test.check(visibleMenus ==
-                   QStringList{QStringLiteral("File"), QStringLiteral("Help")},
+    test.check(visibleMenus == QStringList{QStringLiteral("&File"),
+                                           QStringLiteral("&Help")},
                "Windows should show File and Help, without an OpenSCP menu");
-    test.check(updatesMenu && updatesMenu->title() == QStringLiteral("Help"),
+    test.check(updatesMenu && updatesMenu->title() == QStringLiteral("&Help"),
                "the update actions should move to Help on Windows");
 }
 #endif
+
+OPENSCP_TEST(testMenusHaveDistinctAccessKeys, test) {
+#ifdef Q_OS_MACOS
+    test.skip("macOS menus have no access keys");
+#else
+    // Alt+F did not open File, and no menu item had a letter of its own.
+    configureMainWindowSettings(settingsRootPath);
+    MainWindow window;
+    QList<QKeySequence> menuKeys;
+    for (QAction *menuAction : window.menuBar()->actions()) {
+        QMenu *menu = menuAction->menu();
+        if (!menu || !menuAction->isVisible())
+            continue;
+        const QKeySequence menuKey = QKeySequence::mnemonic(menu->title());
+        test.check(!menuKey.isEmpty() && !menuKeys.contains(menuKey),
+                   "the menu " + menu->title().toStdString() +
+                       " should have an access key of its own");
+        menuKeys.push_back(menuKey);
+        QList<QKeySequence> itemKeys;
+        for (QAction *action : menu->actions()) {
+            if (action->isSeparator() || !action->isVisible())
+                continue;
+            const QKeySequence itemKey = QKeySequence::mnemonic(action->text());
+            test.check(!itemKey.isEmpty() && !itemKeys.contains(itemKey),
+                       "the item " + action->text().toStdString() + " of " +
+                           menu->title().toStdString() +
+                           " should have an access key of its own");
+            test.check(!action->toolTip().contains(QLatin1Char('&')),
+                       "the tooltip of " + action->text().toStdString() +
+                           " should not show the access key marker");
+            itemKeys.push_back(itemKey);
+        }
+    }
+#endif
+}
 
 OPENSCP_TEST(testSettingsAndQuitHaveShortcutsOnEveryPlatform, test) {
     // Qt has no standard shortcut for either on Windows.

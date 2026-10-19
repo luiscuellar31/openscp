@@ -21,6 +21,10 @@ on the keyboard configuration.
 | Show the current keyboard focus | `Shift+Esc` | `Shift+Esc` | Reveals the focus indicator without moving focus. |
 | Quit OpenSCP | `Ctrl+Q` | `Cmd+Q` | Uses the standard quit shortcut. |
 
+On Linux and Windows, `Alt` with the underlined letter of a menu opens it, such
+as `Alt+F` for **File**, and the underlined letter of an item in an open menu
+chooses that item.
+
 ## When a file panel has focus
 
 The following shortcuts act on the file list that currently has focus:

@@ -92,7 +92,8 @@ void setActionIconAndTooltip(QAction *action, const QIcon &icon) {
     if (!action)
         return;
     action->setIcon(icon);
-    action->setToolTip(action->text());
+    // iconText() leaves out the "&" that marks a menu's access key.
+    action->setToolTip(action->iconText());
 }
 
 void bindActionToPanelShortcut(QAction *action, QWidget *panel,
@@ -378,7 +379,7 @@ void MainWindow::initializePanels(const QString &home) {
     actUpLeft_ = leftPaneBar_->addAction(tr("Up"), this, &MainWindow::goUpLeft);
     setActionIconAndTooltip(actUpLeft_, resIcon("action-go-up.svg"));
     // Button "Open left folder" next to Up
-    actChooseLeft_ = leftPaneBar_->addAction(tr("Open left folder"), this,
+    actChooseLeft_ = leftPaneBar_->addAction(tr("Open &left folder"), this,
                                              &MainWindow::chooseLeftDir);
     setActionIconAndTooltip(actChooseLeft_, resIcon("action-open-folder.svg"));
     actHomeLeft_ =
@@ -463,7 +464,7 @@ void MainWindow::initializePanels(const QString &home) {
         rightPaneBar_->addAction(tr("Up"), this, &MainWindow::goUpRight);
     setActionIconAndTooltip(actUpRight_, resIcon("action-go-up.svg"));
     // Button "Open right folder" next to Up
-    actChooseRight_ = rightPaneBar_->addAction(tr("Open right folder"), this,
+    actChooseRight_ = rightPaneBar_->addAction(tr("Open &right folder"), this,
                                                &MainWindow::chooseRightDir);
     setActionIconAndTooltip(actChooseRight_, resIcon("action-open-folder.svg"));
     actHomeRight_ =
@@ -677,16 +678,18 @@ void MainWindow::initializeMainToolbar() {
     leftPaneBar_->setIconSize(QSize(subIconPx, subIconPx));
     rightPaneBar_->setIconSize(QSize(subIconPx, subIconPx));
     // Copy/move/delete actions now live in the left sub‑toolbar
-    actConnect_ =
-        mainToolbar->addAction(tr("Connect"), this, &MainWindow::connectRemote);
+    // The File menu shares these actions. Their tooltips use iconText(),
+    // which leaves out the "&" of the menu's access key.
+    actConnect_ = mainToolbar->addAction(tr("&Connect"), this,
+                                         &MainWindow::connectRemote);
     actConnect_->setObjectName(QStringLiteral("connectAction"));
     actConnect_->setIcon(mainWindowActionIcon("action-connect.svg"));
-    actConnect_->setToolTip(actConnect_->text());
+    actConnect_->setToolTip(actConnect_->iconText());
     mainToolbar->addSeparator();
-    actDisconnect_ = mainToolbar->addAction(tr("Disconnect"), this,
+    actDisconnect_ = mainToolbar->addAction(tr("&Disconnect"), this,
                                             &MainWindow::disconnectRemote);
     actDisconnect_->setIcon(mainWindowActionIcon("action-disconnect.svg"));
-    actDisconnect_->setToolTip(actDisconnect_->text());
+    actDisconnect_->setToolTip(actDisconnect_->iconText());
     actDisconnect_->setEnabled(false);
 
     auto setTextBesideIcon = [mainToolbar](QAction *action,
@@ -704,7 +707,7 @@ void MainWindow::initializeMainToolbar() {
     setTextBesideIcon(actConnect_, tr("Connect"));
     setTextBesideIcon(actDisconnect_, tr("Disconnect"));
     mainToolbar->addSeparator();
-    actSites_ = mainToolbar->addAction(tr("Saved sites"), [this] {
+    actSites_ = mainToolbar->addAction(tr("Sa&ved sites"), [this] {
         // Raise the open Site Manager: the main window refreshes only that one.
         if (siteManager_) {
             siteManager_->show();
@@ -727,31 +730,31 @@ void MainWindow::initializeMainToolbar() {
             restoreFocusAfterDialog(previousFocus);
     });
     actSites_->setIcon(mainWindowActionIcon("action-open-saved-sites.svg"));
-    actSites_->setToolTip(actSites_->text());
+    actSites_->setToolTip(actSites_->iconText());
     mainToolbar->addSeparator();
-    actShowQueue_ = mainToolbar->addAction(tr("Transfers"),
+    actShowQueue_ = mainToolbar->addAction(tr("&Transfers"),
                                            [this] { showTransferQueue(); });
     actShowQueue_->setIcon(
         mainWindowActionIcon("action-open-transfer-queue.svg"));
-    actShowQueue_->setToolTip(actShowQueue_->text());
+    actShowQueue_->setToolTip(actShowQueue_->iconText());
     mainToolbar->addSeparator();
     actSync_ =
-        mainToolbar->addAction(tr("Sync"), this, &MainWindow::showSyncDialog);
+        mainToolbar->addAction(tr("S&ync"), this, &MainWindow::showSyncDialog);
     actSync_->setIcon(mainWindowActionIcon("action-refresh.svg"));
     actSync_->setToolTip(tr("Compare and synchronize the current folders"));
     actSync_->setEnabled(false);
     mainToolbar->addSeparator();
-    actShowHistory_ = mainToolbar->addAction(tr("History"), this,
+    actShowHistory_ = mainToolbar->addAction(tr("&History"), this,
                                              &MainWindow::showHistoryMenu);
     actShowHistory_->setIcon(mainWindowActionIcon("action-open-history.svg"));
-    actShowHistory_->setToolTip(actShowHistory_->text());
+    actShowHistory_->setToolTip(actShowHistory_->iconText());
     mainToolbar->addSeparator();
     actShowFavorites_ = mainToolbar->addAction(
-        tr("Favorites"), this, &MainWindow::showFavoritesDialog);
+        tr("&Favorites"), this, &MainWindow::showFavoritesDialog);
     actShowFavorites_->setObjectName(QStringLiteral("showFavoritesAction"));
     actShowFavorites_->setIcon(
         mainWindowActionIcon("action-open-favorites.svg"));
-    actShowFavorites_->setToolTip(actShowFavorites_->text());
+    actShowFavorites_->setToolTip(actShowFavorites_->iconText());
 
     // Show text beside icon for Sites and Queue too
     setTextBesideIcon(actSites_, tr("Saved sites"));
@@ -844,11 +847,13 @@ bool MainWindow::focusNextPrevChild(bool next) {
 void MainWindow::initializeMenuBarActions() {
     // Menu bar (native on macOS)
     // Duplicate actions so users who prefer the classic menu can use it.
-    appMenu_ = menuBar()->addMenu(tr("OpenSCP"));
-    actAbout_ = appMenu_->addAction(tr("About OpenSCP"), this,
+    // Windows and Linux open a menu, or choose one of its items, with Alt and
+    // the letter after "&"; macOS menus leave the "&" out.
+    appMenu_ = menuBar()->addMenu(tr("&OpenSCP"));
+    actAbout_ = appMenu_->addAction(tr("&About OpenSCP"), this,
                                     &MainWindow::showAboutDialog);
     actAbout_->setMenuRole(QAction::AboutRole);
-    actPrefs_ = appMenu_->addAction(tr("Settings…"), this,
+    actPrefs_ = appMenu_->addAction(tr("&Settings…"), this,
                                     &MainWindow::showSettingsDialog);
     actPrefs_->setMenuRole(QAction::PreferencesRole);
     // The platform's standard shortcuts, such as Cmd+, and Cmd+Q on macOS.
@@ -866,13 +871,13 @@ void MainWindow::initializeMenuBarActions() {
     actPrefs_->setShortcuts(standardShortcutsOr(QKeySequence::Preferences,
                                                 QStringLiteral("Ctrl+,")));
     appMenu_->addSeparator();
-    actQuit_ = appMenu_->addAction(tr("Quit"), this, &QWidget::close);
+    actQuit_ = appMenu_->addAction(tr("&Quit"), this, &QWidget::close);
     actQuit_->setObjectName(QStringLiteral("quitAction"));
     actQuit_->setMenuRole(QAction::QuitRole);
     actQuit_->setShortcuts(
         standardShortcutsOr(QKeySequence::Quit, QStringLiteral("Ctrl+Q")));
 
-    fileMenu_ = menuBar()->addMenu(tr("File"));
+    fileMenu_ = menuBar()->addMenu(tr("&File"));
     fileMenu_->addAction(actChooseLeft_);
     fileMenu_->addAction(actChooseRight_);
     fileMenu_->addSeparator();
@@ -893,13 +898,14 @@ void MainWindow::initializeMenuBarActions() {
 #endif
 
     // Help (avoid native help menu to skip the search box)
-    helpMenu_ = menuBar()->addMenu(tr("Help"));
+    helpMenu_ = menuBar()->addMenu(tr("&Help"));
     // On macOS, a menu titled exactly "Help" triggers the native search bar.
     // Keep visible label "Help" but avoid detection by inserting a zero‑width
     // space.
 #ifdef Q_OS_MAC
     {
-        const QString helpMenuTitle = helpMenu_->title();
+        const QString helpMenuTitle =
+            helpMenu_->title().remove(QLatin1Char('&'));
         if (helpMenuTitle.compare(QStringLiteral("Help"),
                                   Qt::CaseInsensitive) == 0) {
             helpMenu_->setTitle(QStringLiteral("Hel") + QChar(0x200B) +
@@ -910,14 +916,14 @@ void MainWindow::initializeMenuBarActions() {
     helpMenu_->menuAction()->setMenuRole(QAction::NoRole);
     // Prevent macOS from moving actions to the app menu: force NoRole
     {
-        QAction *helpAboutAct = new QAction(tr("About OpenSCP"), this);
+        QAction *helpAboutAct = new QAction(tr("&About OpenSCP"), this);
         helpAboutAct->setMenuRole(QAction::NoRole);
         connect(helpAboutAct, &QAction::triggered, this,
                 &MainWindow::showAboutDialog);
         helpMenu_->addAction(helpAboutAct);
     }
     {
-        QAction *reportAct = new QAction(tr("Report a bug"), this);
+        QAction *reportAct = new QAction(tr("&Report a bug"), this);
         reportAct->setMenuRole(QAction::NoRole);
         connect(reportAct, &QAction::triggered, this, [] {
             QDesktopServices::openUrl(
