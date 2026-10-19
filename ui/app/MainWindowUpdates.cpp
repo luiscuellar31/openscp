@@ -56,13 +56,13 @@ void MainWindow::initializeUpdates() {
 #else
     QMenu *updatesMenu = appMenu_;
 #endif
-    auto *check = updatesMenu->addAction(tr("Check for updates…"));
+    auto *check = updatesMenu->addAction(tr("&Check for updates…"));
     check->setObjectName(QStringLiteral("checkForUpdatesAction"));
     check->setMenuRole(QAction::NoRole);
     connect(check, &QAction::triggered, updates_,
             [this] { updates_->check(true); });
     auto *automatic =
-        updatesMenu->addAction(tr("Automatically check for updates"));
+        updatesMenu->addAction(tr("A&utomatically check for updates"));
     automatic->setObjectName(QStringLiteral("automaticUpdatesAction"));
     automatic->setMenuRole(QAction::NoRole);
     automatic->setCheckable(true);
