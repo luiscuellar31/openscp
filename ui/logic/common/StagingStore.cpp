@@ -7,6 +7,7 @@
 #include <QDir>
 #include <QFileInfo>
 #include <QRegularExpression>
+#include <QSettings>
 #include <QUuid>
 
 namespace openscpui {
@@ -52,6 +53,20 @@ void removeStagingBatch(const QString &batchPath) {
                            QDir::Hidden | QDir::System)) {
         (void)QDir().rmdir(root);
     }
+}
+
+QStringList stagingRootsForStartupCleanup(const QSettings &settings) {
+    const QString root = effectiveStagingRootPath(settings);
+    QStringList roots{root};
+#ifdef Q_OS_LINUX
+    const QString previousDefault =
+        QDir(QDir::homePath())
+            .filePath(QStringLiteral("Downloads/OpenSCP-Dragged"));
+    if (settings.value(settingskeys::kStagingRoot).toString().isEmpty() &&
+        QDir::cleanPath(previousDefault) != QDir::cleanPath(root))
+        roots << previousDefault;
+#endif
+    return roots;
 }
 
 int removeStagingBatchesOlderThan(const QString &root,

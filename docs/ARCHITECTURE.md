@@ -389,7 +389,11 @@ panel deletes its batch, once its copy finishes without errors and only if
 `stagingBatchPathForCleanup()` confirms it is a batch folder in the staging
 root. Any other target, such as another application, may read the files long
 after the drop, so its batch stays; the startup cleanup removes batches older
-than the retention setting. Both deletions, and the removal of a staging root
+than the retention setting. Unless the user chooses one, the staging root is
+`OpenSCP-Dragged` in the system's Downloads folder, which Linux can name in the
+user's language; there the startup cleanup also goes through
+`~/Downloads/OpenSCP-Dragged`, which releases before 1.3.0 used instead. Both
+deletions, and the removal of a staging root
 left empty, run outside the UI thread. The panels take only drags that carry
 local files; text, web links and files that exist only inside another
 application, such as e-mail attachments, are refused.

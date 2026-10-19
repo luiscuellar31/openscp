@@ -13,6 +13,7 @@
 #include <QDir>
 #include <QFile>
 #include <QSettings>
+#include <QStandardPaths>
 #include <QTemporaryDir>
 
 #include <algorithm>
@@ -398,6 +399,54 @@ OPENSCP_TEST(testStagingBatchNames, test) {
                    !openscpui::isStagingBatchName(
                        QStringLiteral("20260101-120000-123")),
                "other folders in the staging root should be left alone");
+}
+
+OPENSCP_TEST(testStagingRootFollowsTheDownloadsFolder, test) {
+    const QString downloads =
+        QStandardPaths::writableLocation(QStandardPaths::DownloadLocation);
+    test.check(
+        downloads.isEmpty() ||
+            openscpui::defaultStagingRootPath() ==
+                QDir(downloads).filePath(QStringLiteral("OpenSCP-Dragged")),
+        "the default staging root should be in the Downloads folder");
+#ifdef Q_OS_LINUX
+    // XDG can name that folder in the user's language; releases before 1.3.0
+    // used ~/Downloads anyway.
+    QTemporaryDir config;
+    test.check(config.isValid(), "the XDG test needs a folder");
+    if (!config.isValid())
+        return;
+    QFile userDirs(
+        QDir(config.path()).filePath(QStringLiteral("user-dirs.dirs")));
+    test.check(userDirs.open(QIODevice::WriteOnly) &&
+                   userDirs.write("XDG_DOWNLOAD_DIR=\"$HOME/Descargas\"\n") > 0,
+               "the XDG folder names should be written");
+    userDirs.close();
+    const bool hadConfigHome = qEnvironmentVariableIsSet("XDG_CONFIG_HOME");
+    const QByteArray configHome = qgetenv("XDG_CONFIG_HOME");
+    qputenv("XDG_CONFIG_HOME", QFile::encodeName(config.path()));
+    const QDir home(QDir::homePath());
+    test.check(openscpui::defaultStagingRootPath() ==
+                   home.filePath(QStringLiteral("Descargas/OpenSCP-Dragged")),
+               "the default staging root should follow the XDG Downloads "
+               "folder");
+    QSettings unset(QDir(config.path()).filePath(QStringLiteral("unset.ini")),
+                    QSettings::IniFormat);
+    test.check(openscpui::stagingRootsForStartupCleanup(unset).contains(
+                   home.filePath(QStringLiteral("Downloads/OpenSCP-Dragged"))),
+               "the startup cleanup should still go through the previous "
+               "default root");
+    QSettings chosen(QDir(config.path()).filePath(QStringLiteral("chosen.ini")),
+                     QSettings::IniFormat);
+    chosen.setValue(openscpui::settingskeys::kStagingRoot, config.path());
+    test.check(openscpui::stagingRootsForStartupCleanup(chosen) ==
+                   QStringList{config.path()},
+               "a chosen staging root should be the only one cleaned");
+    if (hadConfigHome)
+        qputenv("XDG_CONFIG_HOME", configHome);
+    else
+        qunsetenv("XDG_CONFIG_HOME");
+#endif
 }
 
 OPENSCP_TEST(testStagingBatchRemovalTakesAnEmptyRoot, test) {
