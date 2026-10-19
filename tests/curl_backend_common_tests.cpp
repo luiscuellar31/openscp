@@ -646,8 +646,8 @@ OPENSCP_TEST(testHttpProxyAuthenticationIsNegotiated, test) {
 }
 
 OPENSCP_TEST(testProxyThatRefusesTheCredentialsIsAnAuthenticationError, test) {
-    // libcurl reports a refused tunnel as a connection that failed, which
-    // would be retried as a network outage.
+    // libcurl reports a refused tunnel as a connection that failed, or before
+    // 8.20 as a receive error, which would be retried as a network outage.
     const RefusingProxyRun run = runThroughRefusingProxy(test, "Basic");
     const openscp::RemoteError error =
         openscp::curlcommon::errorFromCurl(run.code, run.detail);

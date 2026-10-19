@@ -628,10 +628,11 @@ CURLcode performWithErrorDetail(CURL *curl, std::string &detail) {
     (void)curl_easy_setopt(curl, CURLOPT_ERRORBUFFER, nullptr);
     detail = buffer;
     // libcurl reports a proxy that refused the tunnel as a connection that
-    // failed, which would be retried as a network outage. A 407 asks for
+    // failed, or before 8.20, as on Ubuntu 22.04 and 24.04, as a receive
+    // error; either would be retried as a network outage. A 407 asks for
     // other proxy credentials, which no retry brings.
     long proxyResponse = 0;
-    if (code == CURLE_COULDNT_CONNECT &&
+    if ((code == CURLE_COULDNT_CONNECT || code == CURLE_RECV_ERROR) &&
         curl_easy_getinfo(curl, CURLINFO_HTTP_CONNECTCODE, &proxyResponse) ==
             CURLE_OK &&
         proxyResponse == 407)

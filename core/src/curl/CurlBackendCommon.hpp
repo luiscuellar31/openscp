@@ -170,7 +170,7 @@ RemoteError errorFromCurl(CURLcode code, std::string message,
 // Runs curl_easy_perform with an error buffer, so a failure can name its cause,
 // such as the TLS alert or the refused address. A proxy that refuses the
 // credentials (407) gives CURLE_LOGIN_DENIED rather than libcurl's
-// CURLE_COULDNT_CONNECT.
+// CURLE_COULDNT_CONNECT, or CURLE_RECV_ERROR before libcurl 8.20.
 CURLcode performWithErrorDetail(CURL *curl, std::string &detail);
 // The curl_easy_strerror text, followed by the error-buffer detail when it adds
 // something.
