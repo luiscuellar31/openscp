@@ -140,6 +140,18 @@ bool hasAllFocusParts(const MainWindowFocusParts &parts) {
            parts.scpDownload;
 }
 
+// On macOS, which scrolls by pixel, a 50 000-entry listing froze the window
+// for over a second while the view measured each of its rows.
+OPENSCP_TEST(testFilePanelsGiveEveryRowOneHeight, test) {
+    configureMainWindowSettings(settingsRootPath);
+    MainWindow window;
+    const MainWindowFocusParts parts = focusParts(window);
+    test.check(parts.leftView && parts.rightView &&
+                   parts.leftView->uniformRowHeights() &&
+                   parts.rightView->uniformRowHeights(),
+               "both file panels should give every row the same height");
+}
+
 OPENSCP_TEST(testUpdateMenuIsManualByDefault, test) {
     configureMainWindowSettings(settingsRootPath);
     MainWindow window;
