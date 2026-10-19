@@ -35,9 +35,9 @@ OPENSCP_TEST(testFtpListingsWithLargeWhitespacePadding, test) {
     test.check(openscp::curlparser::parseFtpListListing(listing, entries) ==
                        ListingParseStatus::Success &&
                    entries.size() == 1 &&
-                   entries.front().name == "a file.txt" &&
+                   entries.front().name == "a file.txt \t" &&
                    entries.front().has_size && entries.front().size == 7,
-               "LIST should preserve records with large leading/name padding");
+               "LIST should skip the padding before a name and keep the rest");
     test.check(openscp::curlparser::parseFtpMlsdListing(
                    spaces + "type=file; \t" + spaces + "\r\n", entries) ==
                        ListingParseStatus::Malformed &&
@@ -65,6 +65,30 @@ OPENSCP_TEST(testFtpMlsxNamesKeepTheirSpaces, test) {
                    info) == ListingParseStatus::Success &&
                    info.name == "/dir/ spaced ",
                "MLST should keep spaces in the echoed pathname");
+}
+
+// Without MLSD, as on vsftpd, "notes -> old.txt" showed as "notes", the name
+// of another file, and "trailing " lost its space.
+OPENSCP_TEST(testFtpListNamesKeepArrowsAndTrailingSpaces, test) {
+    std::vector<openscp::FileInfo> entries;
+    test.check(openscp::curlparser::parseFtpListListing(
+                   "-rw-r--r-- 1 u g 6 Oct 18 12:00 notes -> old.txt\r\n"
+                   "drwxr-xr-x 2 u g 4096 Oct 18 12:00 a -> b\r\n"
+                   "lrwxrwxrwx 1 u g 7 Oct 18 12:00 link -> target\r\n"
+                   "-rw-r--r-- 1 u g 6 Oct 18 12:00 trailing \r\n",
+                   entries) == ListingParseStatus::Success &&
+                   entries.size() == 4,
+               "LIST should parse every entry");
+    if (entries.size() != 4)
+        return;
+    test.check(entries[0].name == "notes -> old.txt" && !entries[0].is_dir,
+               "a file whose name holds an arrow should keep its whole name");
+    test.check(entries[1].name == "a -> b" && entries[1].is_dir,
+               "a folder whose name holds an arrow should keep its whole name");
+    test.check(entries[2].name == "link",
+               "a link should drop the target after its arrow");
+    test.check(entries[3].name == "trailing ",
+               "a name should keep its trailing space");
 }
 
 OPENSCP_TEST(testFtpMlsdListingLimitsAreTransactional, test) {

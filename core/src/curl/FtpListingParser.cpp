@@ -228,12 +228,16 @@ bool parseUnixListLine(const std::string &line, FileInfo &info, bool &emit) {
     }
     std::string name;
     std::getline(input, name);
-    name = trimAscii(name);
-    if (name.empty())
+    name = trimAsciiLeft(name);
+    if (trimAscii(name).empty())
         return false;
-    const std::size_t arrowPosition = name.find(" -> ");
-    if (arrowPosition != std::string::npos)
-        name.erase(arrowPosition);
+    // Only a link's line names its target after " -> "; elsewhere it is part
+    // of the name.
+    if (permissions.front() == 'l') {
+        const std::size_t arrowPosition = name.find(" -> ");
+        if (arrowPosition != std::string::npos)
+            name.erase(arrowPosition);
+    }
     if (name == "." || name == "..")
         return true;
 
@@ -368,7 +372,11 @@ ListingParseStatus parseFtpListListing(const std::string &payload,
             normalized.front() == 'l' || normalized.front() == 'c' ||
             normalized.front() == 'b' || normalized.front() == 's' ||
             normalized.front() == 'p') {
-            parsed = parseUnixListLine(normalized, info, emit);
+            // The name ends the line, so its trailing spaces are its own.
+            std::string entry = trimAsciiLeft(line);
+            if (!entry.empty() && entry.back() == '\r')
+                entry.pop_back();
+            parsed = parseUnixListLine(entry, info, emit);
         }
         if (!parsed)
             parsed = parseDosListLine(normalized, info, emit);
