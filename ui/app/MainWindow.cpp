@@ -1873,7 +1873,7 @@ void MainWindow::showOpenPathDialog(bool rightPane) {
     openscpui::OpenPathDialog dialog(
         currentPath, recentPaths,
         navigationStore_.favorites(location, remoteScope),
-        remote ? Qt::CaseSensitive : Qt::CaseInsensitive,
+        openscpui::NavigationStore::pathCaseSensitivity(location),
         mainWindowActionIcon(remote ? "action-open-folder-remote.svg"
                                     : "action-open-folder.svg"),
         this);

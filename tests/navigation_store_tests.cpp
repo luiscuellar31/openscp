@@ -33,8 +33,17 @@ OPENSCP_TEST(testScopedFavorites, test) {
     const QString local = QDir::temp().filePath(QStringLiteral("OpenSCP"));
     test.check(store.toggleFavorite(Location::Local, local),
                "local favorites should not require a remote scope");
+#if defined(Q_OS_WIN) || defined(Q_OS_MACOS)
     test.check(store.isFavorite(Location::Local, local.toUpper()),
-               "local favorite matching should be case insensitive");
+               "local favorites should match without regard to case");
+#else
+    // Marking ~/docs used to remove the star from ~/Docs on Linux.
+    test.check(!store.isFavorite(Location::Local, local.toUpper()),
+               "local favorites that differ in case should stay apart");
+    test.check(store.toggleFavorite(Location::Local, local.toUpper()) &&
+                   store.isFavorite(Location::Local, local),
+               "adding a favorite that differs in case should keep the other");
+#endif
 }
 
 OPENSCP_TEST(testRecentHistory, test) {

@@ -17,6 +17,14 @@ namespace {
 
 constexpr int kMaximumRecentEntries = 20;
 
+// Windows and macOS volumes usually ignore case in names; Linux ones do not,
+// so there ~/Docs and ~/docs are two favorites.
+#if defined(Q_OS_WIN) || defined(Q_OS_MACOS)
+constexpr Qt::CaseSensitivity kLocalPathCase = Qt::CaseInsensitive;
+#else
+constexpr Qt::CaseSensitivity kLocalPathCase = Qt::CaseSensitive;
+#endif
+
 } // namespace
 
 namespace {
@@ -247,6 +255,10 @@ QStringList NavigationStore::favorites(Location location,
                          : createSettings()->value(key).toStringList();
 }
 
+Qt::CaseSensitivity NavigationStore::pathCaseSensitivity(Location location) {
+    return location == Location::Local ? kLocalPathCase : Qt::CaseSensitive;
+}
+
 bool NavigationStore::isFavorite(Location location, const QString &path,
                                  const QString &remoteScope) const {
     const QString normalized = location == Location::Local
@@ -254,8 +266,7 @@ bool NavigationStore::isFavorite(Location location, const QString &path,
                                    : normalizeRemotePath(path);
     if (normalized.isEmpty())
         return false;
-    const Qt::CaseSensitivity sensitivity =
-        location == Location::Local ? Qt::CaseInsensitive : Qt::CaseSensitive;
+    const Qt::CaseSensitivity sensitivity = pathCaseSensitivity(location);
     const QStringList values = favorites(location, remoteScope);
     return std::any_of(values.cbegin(), values.cend(),
                        [&](const QString &value) {
@@ -274,8 +285,7 @@ bool NavigationStore::toggleFavorite(Location location, const QString &path,
 
     auto settings = createSettings();
     QStringList values = settings->value(key).toStringList();
-    const Qt::CaseSensitivity sensitivity =
-        location == Location::Local ? Qt::CaseInsensitive : Qt::CaseSensitive;
+    const Qt::CaseSensitivity sensitivity = pathCaseSensitivity(location);
     bool removed = false;
     values.removeIf([&](const QString &value) {
         const bool matches = value.compare(normalized, sensitivity) == 0;

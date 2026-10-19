@@ -23,6 +23,8 @@ class NavigationStore {
 
     static QString normalizeLocalPath(const QString &path);
     static QString normalizeRemotePath(const QString &path);
+    // Whether two spellings of a path that differ only in case are one place.
+    static Qt::CaseSensitivity pathCaseSensitivity(Location location);
     static QString encodeRecentServer(const openscp::SessionOptions &session);
     static bool decodeRecentServer(const QString &encoded,
                                    openscp::SessionOptions *session = nullptr,
