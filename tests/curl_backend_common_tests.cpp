@@ -282,6 +282,18 @@ OPENSCP_TEST(testWebDavPaths, test) {
                "WebDAV bases and relative paths should compose canonically");
     test.check(webDavServerPath("/", "/release") == "/release",
                "a root WebDAV base should preserve logical paths");
+    const std::string copiedBase =
+        openscp::normalizeWebDavBasePath("/files/john%40example.com");
+    test.check(openscp::curlcommon::encodeUrlPath(
+                   webDavServerPath(copiedBase, "/notes.txt")) ==
+                   "/files/john%40example.com/notes.txt",
+               "a base copied from a URL should be encoded only once");
+    std::string copiedLogical;
+    test.check(webDavLogicalPath(copiedBase,
+                                 "/files/john@example.com/notes.txt",
+                                 copiedLogical) &&
+                   copiedLogical == "/notes.txt",
+               "listings should map back below a base copied from a URL");
 
     std::string logical;
     test.check(webDavLogicalPath("/remote.php/dav/files/alice",

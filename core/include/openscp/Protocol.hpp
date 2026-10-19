@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstddef>
 #include <cstdint>
 #include <string>
 
@@ -190,8 +191,32 @@ inline FtpsMode ftpsModeFromStorageName(const std::string &raw) {
     return FtpsMode::Auto;
 }
 
+// A base copied from a URL can hold %XX escapes, such as %40 for '@'. Each
+// request encodes the path again, so the base is kept with them decoded.
 inline std::string normalizeWebDavBasePath(std::string raw) {
-    return normalizeRemotePath(raw);
+    const auto hexValue = [](char c) {
+        if (c >= '0' && c <= '9')
+            return c - '0';
+        if (c >= 'a' && c <= 'f')
+            return c - 'a' + 10;
+        if (c >= 'A' && c <= 'F')
+            return c - 'A' + 10;
+        return -1;
+    };
+    std::string decoded;
+    decoded.reserve(raw.size());
+    for (std::size_t i = 0; i < raw.size(); ++i) {
+        const int high =
+            raw[i] == '%' && i + 2 < raw.size() ? hexValue(raw[i + 1]) : -1;
+        const int low = high >= 0 ? hexValue(raw[i + 2]) : -1;
+        if (low >= 0) {
+            decoded.push_back(static_cast<char>(high * 16 + low));
+            i += 2;
+        } else {
+            decoded.push_back(raw[i]);
+        }
+    }
+    return normalizeRemotePath(decoded);
 }
 
 inline constexpr std::uint16_t defaultPortForProtocol(Protocol protocol) {
