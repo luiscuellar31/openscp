@@ -100,6 +100,31 @@ OPENSCP_TEST(testRetryAfter, test) {
                "invalid Retry-After values should be ignored");
 }
 
+// Linux takes the first CA bundle it finds; a missing file or a folder with a
+// bundle's name must not stop the search.
+OPENSCP_TEST(testFirstExistingFileSkipsMissingFilesAndFolders, test) {
+    openscp::testsupport::IntegrationTempDir directory;
+    if (!directory.isValid()) {
+        test.check(false, "the CA bundle test should create its directory");
+        return;
+    }
+    const std::filesystem::path root = directory.path();
+    const std::string missing = (root / "missing.pem").string();
+    const std::string folder = (root / "folder.pem").string();
+    const std::string first = (root / "first.pem").string();
+    const std::string second = (root / "second.pem").string();
+    std::filesystem::create_directory(folder);
+    std::ofstream(first) << "first";
+    std::ofstream(second) << "second";
+
+    test.check(openscp::curlcommon::firstExistingFile(
+                   {missing, folder, first, second}) == first,
+               "the first regular file should be the CA bundle");
+    test.check(
+        openscp::curlcommon::firstExistingFile({missing, folder}).empty(),
+        "without a regular file there should be no CA bundle");
+}
+
 OPENSCP_TEST(testTrimAsciiPreservesContentAndWhitespaceRules, test) {
     using openscp::curlcommon::trimAscii;
     test.check(trimAscii("").empty() && trimAscii(" \t\r\n\v\f").empty(),

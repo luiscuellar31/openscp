@@ -201,8 +201,11 @@ FTPS and HTTPS WebDAV connections that verify certificates without a chosen CA
 file trust the system's roots. OpenSSL has none of its own on Windows, so
 there `WindowsServerTrust_win` replaces its check of the server's chain with
 `CertGetCertificateChain` and the SSL policy of Windows, which fetch missing
-roots and honor the Disallowed store; libcurl still checks the host name. A
-chosen CA file is the only one trusted on every platform.
+roots and honor the Disallowed store; libcurl still checks the host name. On
+Linux, `configureTlsPolicy` hands libcurl the first system CA bundle it finds,
+because libcurl's built-in path belongs to the distribution that built it: the
+AppImage's points where Debian and Ubuntu keep nothing. A chosen CA file is the
+only one trusted on every platform.
 
 FTPS and HTTPS WebDAV connections that skip certificate verification pin the
 server's TLS public key. Before the control connection, the connection worker

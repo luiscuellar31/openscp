@@ -889,6 +889,26 @@ bool configureTlsPolicy(CURL *curl, bool verifyPeer,
         err = caPathError;
         return false;
     }
+#ifdef __linux__
+    // libcurl's default CA file is fixed when libcurl is built. The AppImage
+    // bundles Rocky Linux's, whose path Debian and Ubuntu do not have, so name
+    // the bundle of the system it runs on.
+    if (verifyPeer && !chosenCa) {
+        static const std::string systemBundle = firstExistingFile({
+            "/etc/ssl/certs/ca-certificates.crt",                // Debian
+            "/etc/pki/tls/certs/ca-bundle.crt",                  // Fedora
+            "/etc/ssl/ca-bundle.pem",                            // openSUSE
+            "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem", // RHEL
+            "/etc/ssl/cert.pem",                                 // Alpine
+        });
+        if (!systemBundle.empty() &&
+            curl_easy_setopt(curl, CURLOPT_CAINFO, systemBundle.c_str()) !=
+                CURLE_OK) {
+            err = caPathError;
+            return false;
+        }
+    }
+#endif
 #ifdef _WIN32
     // OpenSSL has no trust store of its own on Windows, so Windows itself
     // checks the server, as it does for its own connections. A chosen CA file
@@ -909,6 +929,16 @@ bool configureTlsPolicy(CURL *curl, bool verifyPeer,
         }
     }
     return true;
+}
+
+std::string firstExistingFile(std::initializer_list<std::string_view> paths) {
+    for (const std::string_view path : paths) {
+        std::error_code error;
+        if (std::filesystem::is_regular_file(std::filesystem::path(path),
+                                             error))
+            return std::string(path);
+    }
+    return {};
 }
 
 bool publicKeyPinFromPem(std::string_view pem, std::string &pin) {

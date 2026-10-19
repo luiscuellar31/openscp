@@ -217,6 +217,10 @@ bool configureTlsPolicy(CURL *curl, bool verifyPeer,
                         const char *verificationError, const char *caPathError,
                         std::string &err);
 
+// The first of `paths` that is a regular file, or an empty string. Linux finds
+// its system CA bundle this way.
+std::string firstExistingFile(std::initializer_list<std::string_view> paths);
+
 // The CURLOPT_PINNEDPUBLICKEY form of a PEM certificate's public key.
 bool publicKeyPinFromPem(std::string_view pem, std::string &pin);
 
