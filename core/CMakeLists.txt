@@ -33,6 +33,7 @@ set(OPENSCP_CORE_SRCS
     src/libssh2/detail/Libssh2InputSafety.hpp
     src/libssh2/detail/Libssh2TransferIntegrity.hpp
     src/libssh2/detail/Libssh2WritePacing.hpp
+    src/libssh2/detail/HostKeyBlob.hpp
     src/libssh2/detail/KnownHostsFile.cpp
     src/libssh2/detail/KnownHostsFile.hpp
     src/libssh2/detail/UniqueSftpHandle.cpp

@@ -5,6 +5,7 @@
 #include "common/UniqueFile.hpp"
 #include "libssh2/Libssh2ScpClient.hpp"
 #include "libssh2/Libssh2SftpClient.hpp"
+#include "libssh2/detail/HostKeyBlob.hpp"
 #include "libssh2/detail/KnownHostsFile.hpp"
 #include "libssh2/detail/Libssh2CipherPreference.hpp"
 #include "libssh2/detail/Libssh2ErrorClassifier.hpp"
@@ -2621,6 +2622,51 @@ OPENSCP_TEST(test_windows_jump_command_line_round_trips, t) {
             "the C runtime should read every argument back as given");
 }
 #endif
+
+// An "ssh-rsa" blob with exponent 65537 and a modulus of `modulusBytes`
+// bytes whose first byte is `top`, as an SSH server sends it.
+std::vector<unsigned char> rsaHostKeyBlob(std::size_t modulusBytes,
+                                          unsigned char top) {
+    std::vector<unsigned char> blob;
+    const auto appendField = [&blob](const std::vector<unsigned char> &data) {
+        const auto size = static_cast<std::uint32_t>(data.size());
+        for (const int shift : {24, 16, 8, 0})
+            blob.push_back(static_cast<unsigned char>((size >> shift) & 0xffu));
+        blob.insert(blob.end(), data.begin(), data.end());
+    };
+    appendField({'s', 's', 'h', '-', 'r', 's', 'a'});
+    appendField({0x01, 0x00, 0x01});
+    std::vector<unsigned char> modulus(modulusBytes, 0xa5);
+    modulus.front() = top;
+    if (top & 0x80u)
+        modulus.insert(modulus.begin(), 0x00);
+    appendField(modulus);
+    return blob;
+}
+
+// The new-host prompt used to show 2048-bit RSA keys as 2232-bit, the size of
+// the whole blob.
+OPENSCP_TEST(test_rsa_host_key_bits_come_from_the_modulus, t) {
+    using openscp::libssh2detail::rsaModulusBits;
+    for (const std::size_t bits : {2048u, 3072u, 4096u}) {
+        const auto blob = rsaHostKeyBlob(bits / 8, 0xc3);
+        t.check(rsaModulusBits(blob.data(), blob.size()) ==
+                    static_cast<int>(bits),
+                "an RSA host key should show its modulus size: " +
+                    std::to_string(bits));
+    }
+    const auto shortTop = rsaHostKeyBlob(256, 0x7f);
+    t.check(rsaModulusBits(shortTop.data(), shortTop.size()) == 2047,
+            "a modulus without its top bit should count one bit less");
+    const auto truncated = rsaHostKeyBlob(256, 0xc3);
+    t.check(rsaModulusBits(truncated.data(), truncated.size() - 1) == 0 &&
+                rsaModulusBits(nullptr, 0) == 0,
+            "a cut or missing blob should have no RSA size");
+    const std::vector<unsigned char> ed25519 = {
+        0, 0, 0, 11, 's', 's', 'h', '-', 'e', 'd', '2', '5', '5', '1', '9'};
+    t.check(rsaModulusBits(ed25519.data(), ed25519.size()) == 0,
+            "a key of another type should have no RSA size");
+}
 
 OPENSCP_TEST(test_remove_known_hosts_entry_plain_and_hashed, t) {
     const std::string key =
