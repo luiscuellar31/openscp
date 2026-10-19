@@ -122,6 +122,12 @@ as OpenSSH's sftp and scp do. SFTP writes the `.part` with mode 0600 and
 applies those bits just before the rename; FTP and WebDAV leave permissions to
 the server.
 
+Downloads write their local `.part` with mode 0600 too. Just before the
+rename, `applyDownloadPermissions` gives it the mode of the file it replaces
+or, for a new file, the remote mode from SFTP or SCP (0666 for FTP and WebDAV)
+less the umask and writable by its owner, as OpenSSH's sftp does. Windows has
+no permission bits.
+
 `SessionController` owns the active connection. `RemoteOperationController`
 runs control-connection jobs one at a time and returns completed results.
 Its bulk cancellation methods interrupt matching active I/O before marking

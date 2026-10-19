@@ -1015,6 +1015,55 @@ OPENSCP_TEST(test_safe_local_partial_files, t) {
     fs::remove_all(target.parent_path(), ec);
 }
 
+// Downloads used to stay at the partial file's 0600, and replacing a file took
+// its mode away.
+OPENSCP_TEST(test_downloads_get_the_umask_or_the_replaced_mode, t) {
+#ifdef _WIN32
+    t.skip("Windows files have no permission bits.");
+#else
+    const mode_t mask = ::umask(0);
+    ::umask(mask);
+    const auto expected = [mask](unsigned mode) {
+        return mode & ~static_cast<unsigned>(mask) & 0777u;
+    };
+    const fs::path target = makeTempFilePath("download-mode");
+    const fs::path partial = target.string() + ".part";
+    const auto publish = [&](std::optional<std::uint32_t> remoteMode) {
+        std::string error;
+        openscp::UniqueFile file(openscp::localfiles::openRegularFileForWrite(
+            partial.string(), openscp::localfiles::WriteMode::Truncate, error));
+        if (!file)
+            return false;
+        file.reset();
+        openscp::localfiles::applyDownloadPermissions(
+            partial.string(), target.string(), remoteMode);
+        return openscp::localfiles::atomicReplace(partial.string(),
+                                                  target.string(), error);
+    };
+    const auto modeOf = [&target] {
+        struct stat metadata {};
+        return ::stat(target.c_str(), &metadata) == 0
+                   ? static_cast<unsigned>(metadata.st_mode) & 0777u
+                   : 07777u;
+    };
+    std::error_code ec;
+
+    t.check(publish(std::nullopt) && modeOf() == expected(0666u),
+            "a new download without a remote mode should get 0666 less the "
+            "umask");
+    fs::remove(target, ec);
+    t.check(publish(0755u) && modeOf() == expected(0755u),
+            "a new download should keep the remote mode less the umask");
+    fs::remove(target, ec);
+    t.check(publish(0444u) && modeOf() == expected(0644u),
+            "a new download should stay writable by its owner");
+    t.check(::chmod(target.c_str(), 0750) == 0 && publish(0644u) &&
+                modeOf() == 0750u,
+            "a download that replaces a file should keep that file's mode");
+    fs::remove_all(target.parent_path(), ec);
+#endif
+}
+
 OPENSCP_TEST(test_safe_local_partial_fifos, t) {
 #ifdef _WIN32
     t.skip("Windows has no FIFOs among its files.");

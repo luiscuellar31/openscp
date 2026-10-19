@@ -383,6 +383,8 @@ bool Libssh2ScpClient::get(
         setLastOperationError(RemoteErrorKind::Canceled, err);
         return false;
     }
+    localfiles::applyDownloadPermissions(
+        partial, local, static_cast<std::uint32_t>(fileInfo.st_mode));
     std::string replaceError;
     if (!localfiles::atomicReplace(partial, local, replaceError,
                                    localFileDurability)) {
