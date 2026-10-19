@@ -5,6 +5,7 @@
 
 #include <QDateTime>
 #include <QString>
+#include <QStringList>
 
 class QSettings;
 
@@ -28,5 +29,10 @@ void removeStagingBatch(const QString &batchPath);
 // Deletes the batches directly in `root` last modified before `cutoff`,
 // without following symbolic links. Returns how many it deleted.
 int removeStagingBatchesOlderThan(const QString &root, const QDateTime &cutoff);
+
+// The staging roots the startup cleanup goes through: the one in use and, on
+// Linux without a chosen root, ~/Downloads/OpenSCP-Dragged, which releases
+// before 1.3.0 used even when the Downloads folder has another name.
+QStringList stagingRootsForStartupCleanup(const QSettings &settings);
 
 } // namespace openscpui

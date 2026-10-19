@@ -1231,7 +1231,8 @@ void MainWindow::initializeRuntimeState() {
                 .toBool();
         if (!autoClean)
             return;
-        const QString root = openscpui::effectiveStagingRootPath(settings);
+        const QStringList roots =
+            openscpui::stagingRootsForStartupCleanup(settings);
         const int retentionDays = qBound(
             1,
             settings.value(openscpui::settingskeys::kStagingRetentionDays, 7)
@@ -1240,8 +1241,9 @@ void MainWindow::initializeRuntimeState() {
         const QDateTime cutoff =
             QDateTime::currentDateTimeUtc().addDays(-retentionDays);
         // Batches can hold whole downloads, so they go away off the UI thread.
-        QThreadPool::globalInstance()->start([root, cutoff] {
-            (void)openscpui::removeStagingBatchesOlderThan(root, cutoff);
+        QThreadPool::globalInstance()->start([roots, cutoff] {
+            for (const QString &root : roots)
+                (void)openscpui::removeStagingBatchesOlderThan(root, cutoff);
         });
     });
 

@@ -42,13 +42,12 @@ QString statusError(QSettings::Status status) {
 } // namespace
 
 QString defaultStagingRootPath() {
-#ifdef Q_OS_WIN
-    // Windows can move the Downloads folder, often onto another drive.
+    // Windows can move the Downloads folder, often onto another drive, and
+    // Linux can name it in the user's language, such as ~/Descargas.
     const QString downloads =
         QStandardPaths::writableLocation(QStandardPaths::DownloadLocation);
     if (!downloads.isEmpty())
         return QDir(downloads).filePath(QStringLiteral("OpenSCP-Dragged"));
-#endif
     return QDir(QDir::homePath())
         .filePath(QStringLiteral("Downloads/OpenSCP-Dragged"));
 }
