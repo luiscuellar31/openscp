@@ -282,6 +282,22 @@ OPENSCP_TEST(testEditingKeepsTheJumpHost, test) {
                "editing a site should keep its SSH jump host");
 }
 
+OPENSCP_TEST(testEditingKeepsAWebDavBasePathWithPercentSigns, test) {
+    // The dialog showed a folder named "a%20b" as typed, and reading it back
+    // decoded it into "a b".
+    clearSettings();
+    ConnectionDialog dialog;
+    openscp::SessionOptions options;
+    options.protocol = openscp::Protocol::WebDav;
+    options.host = "dav.example";
+    options.port = 443;
+    options.username = "alice";
+    options.webdav_base_path = "/shared/a%20b";
+    dialog.setOptions(options);
+    test.check(dialog.options().webdav_base_path == "/shared/a%20b",
+               "editing a site should keep its WebDAV base path");
+}
+
 OPENSCP_TEST(testAcceptButtonCanDescribeTheAction, test) {
     clearSettings();
     ConnectionDialog dialog;

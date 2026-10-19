@@ -92,8 +92,8 @@ NavigationStore::encodeRecentServer(const openscp::SessionOptions &session) {
                 openscp::normalizeWebDavScheme(session.webdav_scheme))));
         query.addQueryItem(
             QStringLiteral("webdavBasePath"),
-            QString::fromStdString(
-                openscp::normalizeWebDavBasePath(session.webdav_base_path)));
+            QString::fromStdString(openscp::webDavBasePathToText(
+                openscp::normalizeWebDavBasePath(session.webdav_base_path))));
     }
     return query.toString(QUrl::FullyEncoded);
 }
@@ -174,7 +174,7 @@ bool NavigationStore::decodeRecentServer(const QString &encoded,
                 decoded.webdav_verify_peer = false;
                 decoded.webdav_ca_cert_path.reset();
             }
-            decoded.webdav_base_path = openscp::normalizeWebDavBasePath(
+            decoded.webdav_base_path = openscp::webDavBasePathFromText(
                 query.queryItemValue(QStringLiteral("webdavBasePath"))
                     .trimmed()
                     .toStdString());

@@ -1511,6 +1511,26 @@ OPENSCP_TEST(test_protocol_helpers, t) {
     t.check(openscp::normalizeWebDavBasePath("/dav/root/../files") ==
                 "/dav/files",
             "WebDAV base paths should resolve dot segments");
+    // A base copied from a URL used to be encoded a second time, so the
+    // server got "john%2540example.com" and answered 404.
+    t.check(openscp::webDavBasePathFromText(
+                "/remote.php/dav/files/john%40example.com/My%20Files") ==
+                "/remote.php/dav/files/john@example.com/My Files",
+            "WebDAV base paths should decode the escapes of a URL");
+    t.check(openscp::webDavBasePathFromText("/caf%c3%a9") == "/caf\xc3\xa9",
+            "WebDAV base paths should decode escapes in either case");
+    t.check(openscp::webDavBasePathFromText("/100%25/%zz/%4") == "/100%/%zz/%4",
+            "WebDAV base paths should keep a '%' that starts no escape");
+    // Decoding a decoded path again turned a folder named "a%20b" into
+    // "a b": it could not be reached, and saving the site renamed it.
+    for (const std::string path :
+         {"/files/a%20b", "/100%/x", "/a%%41", "/end%4", "/caf\xc3\xa9"}) {
+        t.check(openscp::normalizeWebDavBasePath(path) == path &&
+                    openscp::webDavBasePathFromText(
+                        openscp::webDavBasePathToText(path)) == path,
+                "a WebDAV base path should keep its own percent signs: " +
+                    path);
+    }
 
     [[maybe_unused]] const openscp::ProtocolCapabilities managedFiles{
         .implemented = true,

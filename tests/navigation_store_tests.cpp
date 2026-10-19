@@ -96,6 +96,15 @@ OPENSCP_TEST(testServerRoundTripDoesNotPersistSecrets, test) {
                "endpoint identity should survive the round trip");
     test.check(decoded.webdav_base_path == "/dav/alice",
                "the WebDAV namespace should survive the round trip");
+    openscp::SessionOptions literal = original;
+    literal.webdav_base_path = "/dav/a%20b";
+    openscp::SessionOptions literalDecoded;
+    test.check(openscpui::NavigationStore::decodeRecentServer(
+                   openscpui::NavigationStore::encodeRecentServer(literal),
+                   &literalDecoded, nullptr) &&
+                   literalDecoded.webdav_base_path == "/dav/a%20b",
+               "a folder named with a percent escape should survive the "
+               "round trip");
     test.check(!decoded.password.has_value(),
                "decoded history must never manufacture credentials");
     test.check(label.contains(QStringLiteral("alice@dav.example:8443")),

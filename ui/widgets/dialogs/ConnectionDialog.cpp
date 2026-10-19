@@ -1165,7 +1165,7 @@ openscp::SessionOptions ConnectionDialog::options() const {
                 webDavScheme_->currentData().toInt()));
     }
     if (webDavBasePath_) {
-        sessionOptions.webdav_base_path = openscp::normalizeWebDavBasePath(
+        sessionOptions.webdav_base_path = openscp::webDavBasePathFromText(
             webDavBasePath_->text().trimmed().toStdString());
     }
     sessionOptions.host = host_->text().toStdString();
@@ -1343,8 +1343,9 @@ void ConnectionDialog::setOptions(const openscp::SessionOptions &options) {
             openscp::normalizeWebDavScheme(options.webdav_scheme);
     }
     if (webDavBasePath_) {
-        webDavBasePath_->setText(QString::fromStdString(
-            openscp::normalizeWebDavBasePath(options.webdav_base_path)));
+        webDavBasePath_->setText(
+            QString::fromStdString(openscp::webDavBasePathToText(
+                openscp::normalizeWebDavBasePath(options.webdav_base_path))));
     }
     if (webDavVerifyPeer_)
         webDavVerifyPeer_->setChecked(options.webdav_verify_peer);

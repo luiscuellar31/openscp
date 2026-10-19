@@ -157,6 +157,40 @@ OPENSCP_TEST(testSavingSitesKeepsOtherKeysInTheirGroup, test) {
                "the remaining site should load");
 }
 
+OPENSCP_TEST(testWebDavBasePathKeepsItsPercentSigns, test) {
+    // Saving decoded the base path once more, so a folder named "a%20b"
+    // came back as "a b".
+    SiteEntry site;
+    site.siteId = QStringLiteral("percent-site-id");
+    site.name = QStringLiteral("Shared DAV");
+    site.opt.protocol = openscp::Protocol::WebDav;
+    site.opt.host = "dav.example";
+    site.opt.username = "deploy";
+    site.opt.webdav_base_path = "/shared/a%20b";
+    test.check(SavedSitesPersistence::saveSites({site}).ok,
+               "the site should be saved");
+    auto loaded = SavedSitesPersistence::loadSites();
+    test.check(loaded.sites.size() == 1 &&
+                   loaded.sites.front().opt.webdav_base_path == "/shared/a%20b",
+               "a folder named with a percent escape should survive saving");
+
+    // A site of an earlier version holds the escapes copied from a URL.
+    {
+        QSettings raw;
+        raw.beginReadArray(QStringLiteral("sites"));
+        raw.setArrayIndex(0);
+        const QString group = raw.group();
+        raw.endArray();
+        raw.setValue(group + QStringLiteral("/webdavBasePath"),
+                     QStringLiteral("/files/john%40example.com"));
+    }
+    loaded = SavedSitesPersistence::loadSites();
+    test.check(loaded.sites.size() == 1 &&
+                   loaded.sites.front().opt.webdav_base_path ==
+                       "/files/john@example.com",
+               "a saved base path copied from a URL should be decoded");
+}
+
 OPENSCP_TEST(testRoundTrip, test) {
     SiteEntry site;
     site.siteId = QStringLiteral("stable-site-id");

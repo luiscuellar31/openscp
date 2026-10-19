@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstddef>
 #include <cstdint>
 #include <string>
 
@@ -190,8 +191,62 @@ inline FtpsMode ftpsModeFromStorageName(const std::string &raw) {
     return FtpsMode::Auto;
 }
 
+// The base path of a WebDAV site, kept as the server names it: each request
+// encodes the path again.
 inline std::string normalizeWebDavBasePath(std::string raw) {
     return normalizeRemotePath(raw);
+}
+
+namespace detail {
+inline int hexDigitValue(char c) {
+    if (c >= '0' && c <= '9')
+        return c - '0';
+    if (c >= 'a' && c <= 'f')
+        return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F')
+        return c - 'A' + 10;
+    return -1;
+}
+
+// Whether text[i] is a '%' followed by two hexadecimal digits.
+inline bool startsPercentEscape(const std::string &text, std::size_t i) {
+    return text[i] == '%' && i + 2 < text.size() &&
+           hexDigitValue(text[i + 1]) >= 0 && hexDigitValue(text[i + 2]) >= 0;
+}
+} // namespace detail
+
+// A base path as typed or saved. Copied from a URL, it can hold %XX escapes,
+// such as %40 for '@', which are decoded here, once: decoding a path again
+// would change a folder whose own name holds one. A '%' that starts no escape
+// stays as it is.
+inline std::string webDavBasePathFromText(const std::string &text) {
+    std::string decoded;
+    decoded.reserve(text.size());
+    for (std::size_t i = 0; i < text.size(); ++i) {
+        if (detail::startsPercentEscape(text, i)) {
+            decoded.push_back(
+                static_cast<char>(detail::hexDigitValue(text[i + 1]) * 16 +
+                                  detail::hexDigitValue(text[i + 2])));
+            i += 2;
+        } else {
+            decoded.push_back(text[i]);
+        }
+    }
+    return normalizeWebDavBasePath(decoded);
+}
+
+// The text that webDavBasePathFromText() reads back as `path`: a '%' that
+// would start an escape is written as %25.
+inline std::string webDavBasePathToText(const std::string &path) {
+    std::string text;
+    text.reserve(path.size());
+    for (std::size_t i = 0; i < path.size(); ++i) {
+        if (detail::startsPercentEscape(path, i))
+            text += "%25";
+        else
+            text.push_back(path[i]);
+    }
+    return text;
 }
 
 inline constexpr std::uint16_t defaultPortForProtocol(Protocol protocol) {
