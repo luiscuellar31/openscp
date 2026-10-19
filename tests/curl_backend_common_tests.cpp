@@ -760,9 +760,9 @@ TestCertificate makeTestCertificate(const char *commonName,
 // to the user's trusted roots.
 class TestChainEngine {
     public:
-    explicit TestChainEngine(const std::vector<unsigned char> &der) {
-        roots_ = ::CertOpenStore(CERT_STORE_PROV_MEMORY, 0, 0,
-                                 CERT_STORE_CREATE_NEW_FLAG, nullptr);
+    explicit TestChainEngine(const std::vector<unsigned char> &der)
+        : roots_(::CertOpenStore(CERT_STORE_PROV_MEMORY, 0, 0,
+                                 CERT_STORE_CREATE_NEW_FLAG, nullptr)) {
         if (!roots_ ||
             !::CertAddEncodedCertificateToStore(
                 roots_, X509_ASN_ENCODING, der.data(),

@@ -272,7 +272,8 @@ std::wstring findSshExecutable(const std::wstring &pathValue,
         std::size_t end = pathValue.find(L';', start);
         if (end == std::wstring::npos)
             end = pathValue.size();
-        std::wstring_view folder(pathValue.data() + start, end - start);
+        std::wstring_view folder =
+            std::wstring_view(pathValue).substr(start, end - start);
         // cmd.exe accepts quoted entries, as "C:\Program Files\Git\usr\bin".
         if (folder.size() >= 2 && folder.front() == L'"' &&
             folder.back() == L'"')

@@ -224,7 +224,8 @@ bool parseLocalPath(const std::string &utf8, LocalPath &path,
         std::size_t end = position;
         while (end < wide.size() && !isSeparator(wide[end]))
             ++end;
-        const std::wstring_view name(wide.data() + position, end - position);
+        const std::wstring_view name =
+            std::wstring_view(wide).substr(position, end - position);
         position = end + 1;
         if (name.empty() || name == L".")
             continue;

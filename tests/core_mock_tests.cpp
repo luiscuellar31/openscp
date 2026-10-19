@@ -312,9 +312,9 @@ struct LoopbackPort {
         openscp::libssh2detail::kInvalidSocket;
     std::uint16_t port = 0;
 
-    explicit LoopbackPort(bool listening) {
-        socket = openscp::libssh2detail::openSocket(AF_INET, SOCK_STREAM,
-                                                    IPPROTO_TCP);
+    explicit LoopbackPort(bool listening)
+        : socket(openscp::libssh2detail::openSocket(AF_INET, SOCK_STREAM,
+                                                    IPPROTO_TCP)) {
         sockaddr_in address{};
         address.sin_family = AF_INET;
         address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
