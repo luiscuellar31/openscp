@@ -90,8 +90,13 @@ function Start-TestServer([int]$Port, [string[]]$Extra) {
 $servers = @()
 try {
     # The first server makes the keys, which the jump host then shares. It
-    # also holds an account that asks for a one-time code after the password.
-    $twoFactor = @{ User = 'openscp_2fa'; Password = 'two-factor-it'; Code = '135790' }
+    # also holds an account that asks for a one-time code after the password,
+    # made for each run so that no password is written here.
+    $twoFactor = @{
+        User = 'openscp_2fa'
+        Password = [guid]::NewGuid().ToString('N')
+        Code = '135790'
+    }
     $servers += Start-TestServer 2222 @('--two-factor',
         "$($twoFactor.User):$($twoFactor.Password):$($twoFactor.Code)")
     $servers += Start-TestServer 2223 @('--forward')
