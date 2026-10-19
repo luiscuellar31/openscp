@@ -29,6 +29,7 @@
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <future>
 #include <iterator>
 #include <memory>
 #include <mutex>
@@ -458,6 +459,41 @@ OPENSCP_TEST(testConcurrentConflictsUseOneBatchResolution, test) {
         "the one batch decision should resolve every concurrent conflict");
     test.check(coordinator.batchPolicy(batchId) == TransferConflictPolicy::Skip,
                "apply-to-remaining should persist the selected batch policy");
+}
+
+OPENSCP_TEST(testBatchPolicyDoesNotWaitForAPrompt, test) {
+    // A prompt keeps its batch while the user decides. Reading or setting the
+    // batch's policy waited for it, and the queue does that under its own
+    // lock, which the prompt's cancel check takes: the queue could freeze.
+    ConflictCoordinator coordinator;
+    constexpr std::uint64_t batchId = 45;
+    std::promise<void> asked;
+    std::promise<void> answer;
+    const std::shared_future<void> answered = answer.get_future().share();
+    std::thread worker([&] {
+        ConflictRequest request;
+        request.batchId = batchId;
+        (void)coordinator.resolve(
+            request, TransferConflictPolicy::Ask, [&](const ConflictRequest &) {
+                asked.set_value();
+                answered.wait();
+                return ConflictResolution{TransferConflictPolicy::Skip};
+            });
+    });
+    asked.get_future().wait();
+    auto policy = std::async(std::launch::async, [&] {
+        coordinator.ensureBatchPolicy(batchId,
+                                      TransferConflictPolicy::Overwrite);
+        return coordinator.batchPolicy(batchId);
+    });
+    const bool returned = policy.wait_for(2s) == std::future_status::ready;
+    answer.set_value();
+    worker.join();
+
+    test.check(returned,
+               "the batch policy should be reachable while a prompt is open");
+    test.check(policy.get() == TransferConflictPolicy::Ask,
+               "a batch that is asking keeps Ask until the user decides");
 }
 
 OPENSCP_TEST(testMixedTaskBatchEnqueue, test) {

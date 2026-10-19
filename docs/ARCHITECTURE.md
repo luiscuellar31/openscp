@@ -250,7 +250,9 @@ for upload sources; this may serialize case-distinct local names on a
 case-sensitive volume. Remote keys retain case. A download whose destination
 exists only under another spelling (`localEntryName`), as when two remote names
 that differ in case meet in one file on Windows and macOS, takes a free name
-whatever the conflict policy. Partial-file cleanup applies
+whatever the conflict policy. `ConflictCoordinator` asks about one conflict of
+a batch at a time; the queue reads and sets a batch's policy under a lock that
+a prompt does not hold, so it never waits for the user. Partial-file cleanup applies
 only to uploads and downloads that have not finished their transfer. For a
 removed download it acquires the same reservations and leaves the file intact
 while another task, queued or running, can still use it. A removed upload
