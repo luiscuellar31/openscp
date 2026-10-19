@@ -1153,20 +1153,25 @@ std::vector<std::string> known_hosts_tokens(const std::string &host,
     return {"[" + host + "]:" + std::to_string(port)};
 }
 
+// Whether `line` records a key of the site's own. Lines with a marker,
+// @cert-authority or @revoked, name the host but hold no key of its own.
+bool line_holds_site_key(const std::string &line,
+                         const std::vector<std::string> &targets) {
+    const std::size_t first = line.find_first_not_of(" \t");
+    return first != std::string::npos && line[first] != '@' &&
+           line_matches_site_host(line, targets);
+}
+
 // The key types known_hosts records for `host` and `port`, under plain or
-// hashed names. Lines with a marker, @cert-authority or @revoked, hold no key
-// of the host's own.
+// hashed names.
 std::vector<std::string>
 recorded_host_key_types(const std::vector<std::string> &lines,
                         const std::string &host, std::uint16_t port) {
     const std::vector<std::string> tokens = known_hosts_tokens(host, port);
     std::vector<std::string> types;
     for (const std::string &line : lines) {
-        const std::size_t first = line.find_first_not_of(" \t");
-        if (first == std::string::npos || line[first] == '@' ||
-            !line_matches_site_host(line, tokens)) {
+        if (!line_holds_site_key(line, tokens))
             continue;
-        }
         std::size_t hostStart = 0;
         std::size_t hostEnd = 0;
         if (!parse_known_hosts_host_field(line, hostStart, hostEnd))
@@ -4137,7 +4142,7 @@ bool HasKnownHostEntry(const std::string &khPath, const std::string &host,
     const std::vector<std::string> hostTokens = known_hosts_tokens(host, port);
     return std::any_of(lines.begin(), lines.end(),
                        [&hostTokens](const std::string &line) {
-                           return line_matches_site_host(line, hostTokens);
+                           return line_holds_site_key(line, hostTokens);
                        });
 }
 
@@ -4184,7 +4189,7 @@ bool RemoveKnownHostEntry(const std::string &khPath, const std::string &host,
     while (std::getline(inLines, line)) {
         if (!line.empty() && line.back() == '\r')
             line.pop_back();
-        if (line_matches_site_host(line, hostTokens)) {
+        if (line_holds_site_key(line, hostTokens)) {
             removedAny = true;
             continue;
         }

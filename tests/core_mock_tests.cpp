@@ -2659,6 +2659,46 @@ OPENSCP_TEST(test_remove_known_hosts_entry_plain_and_hashed, t) {
     fs::remove_all(khPath.parent_path(), ec);
 }
 
+// Deleting a site and its saved key used to delete the revocation of that key,
+// so trust on first use could then offer the revoked key as a new host.
+OPENSCP_TEST(test_remove_known_hosts_entry_keeps_marker_lines, t) {
+    const std::string key =
+        "AAAAC3NzaC1lZDI1NTE5AAAAILZlz+tnMZZGpyX4/qwU9iIfMHkUqPnwGwGZRuQQ3v1d";
+    const fs::path khPath = makeTempFilePath("openscp-knownhosts-markers");
+    {
+        std::ofstream out(khPath, std::ios::binary | std::ios::trunc);
+        t.check(out.is_open(), "known_hosts marker fixture should be writable");
+        if (!out.is_open())
+            return;
+        out << "@revoked example.com ssh-ed25519 " << key << "\n";
+        out << "@cert-authority example.com ssh-ed25519 " << key << "\n";
+    }
+    t.check(!openscp::HasKnownHostEntry(khPath.string(), "example.com", 22),
+            "marker lines should not count as a saved key of the host");
+
+    {
+        std::ofstream out(khPath, std::ios::binary | std::ios::app);
+        out << "example.com ssh-ed25519 " << key << "\n";
+    }
+    std::string err;
+    t.checkWithError(
+        openscp::RemoveKnownHostEntry(khPath.string(), "example.com", 22, err),
+        "removing the saved key should succeed: ", err);
+    std::string content;
+    t.check(readTextFile(khPath, content),
+            "updated known_hosts marker fixture should be readable");
+    t.check(content.find("\nexample.com ssh-ed25519") == std::string::npos,
+            "the saved key of the host should be removed");
+    t.check(content.find("@revoked example.com") != std::string::npos &&
+                content.find("@cert-authority example.com") !=
+                    std::string::npos,
+            "removing a saved key should keep revocations and CAs");
+
+    std::error_code ec;
+    fs::remove(khPath, ec);
+    fs::remove_all(khPath.parent_path(), ec);
+}
+
 OPENSCP_TEST(test_remove_known_hosts_entry_non_default_port, t) {
     const std::string key =
         "AAAAC3NzaC1lZDI1NTE5AAAAILZlz+tnMZZGpyX4/qwU9iIfMHkUqPnwGwGZRuQQ3v1d";
