@@ -35,6 +35,25 @@ SiteEntry savedSiteFixture() {
     return site;
 }
 
+// Answers the message boxes that open next, in turn, from inside their own
+// event loops, and records the text of each one.
+void answerNextMessageBoxes(QObject *context,
+                            QList<QMessageBox::StandardButton> answers,
+                            QStringList &texts) {
+    if (answers.isEmpty())
+        return;
+    QTimer::singleShot(0, context, [context, answers, &texts]() mutable {
+        auto *box =
+            qobject_cast<QMessageBox *>(QApplication::activeModalWidget());
+        if (!box)
+            return;
+        texts << box->text();
+        const QMessageBox::StandardButton answer = answers.takeFirst();
+        answerNextMessageBoxes(context, answers, texts);
+        box->done(answer);
+    });
+}
+
 OPENSCP_TEST(testEmptyStateIsTheInitialCallToAction, test) {
     clearSavedSites();
     SiteManagerDialog dialog;
@@ -186,6 +205,8 @@ OPENSCP_TEST(testChangesKeepSitesSavedElsewhere, test) {
     if (!table || !table->model() || !deleteButton)
         return;
     table->selectRow(0);
+    QStringList questions;
+    answerNextMessageBoxes(&dialog, {QMessageBox::Yes}, questions);
     deleteButton->click();
 
     const auto stored = SavedSitesPersistence::loadSites().sites;
@@ -234,6 +255,41 @@ OPENSCP_TEST(testDuplicateKeepsPercentSignsInTheName, test) {
                    names.join(QStringLiteral(", ")).toStdString());
 }
 
+// One click used to delete a site, and its credentials in the keychain when
+// that setting is on, without asking.
+OPENSCP_TEST(testRemovingASiteAsksFirst, test) {
+    clearSavedSites();
+    test.check(SavedSitesPersistence::saveSites({savedSiteFixture()}).ok,
+               "the site to delete should be saved");
+    SiteManagerDialog dialog;
+    auto *table =
+        dialog.findChild<QTableView *>(QStringLiteral("savedSitesTable"));
+    auto *deleteButton = dialog.findChild<QPushButton *>(
+        QStringLiteral("siteManagerDeleteButton"));
+    test.check(table && deleteButton,
+               "the delete test needs the table and its button");
+    if (!table || !deleteButton)
+        return;
+    table->selectRow(0);
+    QString question;
+    QMessageBox::StandardButton defaultAnswer = QMessageBox::NoButton;
+    QTimer::singleShot(0, &dialog, [&question, &defaultAnswer] {
+        if (auto *box = qobject_cast<QMessageBox *>(
+                QApplication::activeModalWidget())) {
+            question = box->text();
+            defaultAnswer = box->standardButton(box->defaultButton());
+            box->done(QMessageBox::No);
+        }
+    });
+    deleteButton->click();
+    test.check(question.contains(savedSiteFixture().name),
+               "deleting a site should first ask, naming the site");
+    test.check(defaultAnswer == QMessageBox::No,
+               "keeping the site should be the default answer");
+    test.check(SavedSitesPersistence::loadSites().sites.size() == 1,
+               "answering No should keep the site");
+}
+
 OPENSCP_TEST(testRemovingASiteOnlyRemovesItsHostKeyWhenAsked, test) {
     clearSavedSites();
     QTemporaryDir directory;
@@ -264,8 +320,8 @@ OPENSCP_TEST(testRemovingASiteOnlyRemovesItsHostKeyWhenAsked, test) {
         return entry;
     };
 
-    // Removes the only listed site, answering any question with `answer`,
-    // and tells whether a question was asked.
+    // Removes the only listed site, answering the host key question with
+    // `answer`, and tells whether it was asked.
     const auto removeOnlySite = [&test](const QVector<SiteEntry> &sites,
                                         QMessageBox::StandardButton answer) {
         test.check(SavedSitesPersistence::saveSites(sites).ok,
@@ -278,16 +334,11 @@ OPENSCP_TEST(testRemovingASiteOnlyRemovesItsHostKeyWhenAsked, test) {
         if (!table || !deleteButton)
             return false;
         table->selectRow(0);
-        bool asked = false;
-        QTimer::singleShot(0, &dialog, [&asked, answer] {
-            if (auto *box = qobject_cast<QMessageBox *>(
-                    QApplication::activeModalWidget())) {
-                asked = true;
-                box->done(answer);
-            }
-        });
+        // The deletion is confirmed first; a second question is the key's.
+        QStringList questions;
+        answerNextMessageBoxes(&dialog, {QMessageBox::Yes, answer}, questions);
         deleteButton->click();
-        return asked;
+        return questions.size() > 1;
     };
 
     test.check(writeKnownHosts(), "the known_hosts fixture should be written");
