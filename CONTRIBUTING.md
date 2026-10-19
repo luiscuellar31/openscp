@@ -162,12 +162,18 @@ the keyboard and screen-reader matrix in
   direction is described in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 - Do not call remote clients, presentation callbacks, or emit Qt signals while
   holding queue/state mutexes.
+- Change the state that a condition-variable wait checks, including a
+  `std::jthread` stop request, while holding that wait's mutex; otherwise the
+  wake-up can arrive before the wait and be lost.
 - Changes to persisted formats require explicit decisions about schema and
   versioning, together with tests for the resulting behavior.
 - Never persist passwords, passphrases, or proxy credentials in plain settings
   or transfer-queue data.
 - Add tests for success, failure, cancellation, malformed input, and concurrent
   behavior when those paths are relevant.
+- In tests, wait for what another thread produces with `waitUntil` or
+  `spinUntil` and a bounded timeout; do not check it right after the call that
+  starts it, and do not use a fixed sleep to wait for another thread.
 - Tests should link the production target that owns the behavior; do not compile
   private copies of production `.cpp` files.
 
