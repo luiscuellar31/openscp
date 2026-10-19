@@ -252,8 +252,11 @@ class RemoteOperationController::Impl {
                 registration.canceled->store(true, std::memory_order_relaxed);
             }
             interruptActiveLocked();
+            // Under the lock, so the stop cannot fall between the worker's
+            // check for it and its wait, where the wake below would be missed
+            // and the join would never return.
+            worker_.request_stop();
         }
-        worker_.request_stop();
         wake_.notify_all();
         if (worker_.joinable())
             worker_.join();
