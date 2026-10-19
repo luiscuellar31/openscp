@@ -4973,7 +4973,8 @@ OPENSCP_TEST(testQueueWriterReportsAFailureOnce, test) {
     test.check(savedDestinations(path) == QStringList{QStringLiteral("/saved")},
                "a queue that fits should be saved again");
     writer.saveAndWait(queueOverTheTaskLimit());
-    test.check(warnings.load() == 2,
+    // The writer may report a failure only after saveAndWait has returned.
+    test.check(waitUntil([&warnings] { return warnings.load() == 2; }),
                "a failure after a successful save should be reported again");
 }
 
