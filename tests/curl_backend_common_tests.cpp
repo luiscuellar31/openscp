@@ -1257,6 +1257,9 @@ OPENSCP_TEST(testWebDavDownloadsKeepTheBytesTheServerSent, test) {
     test.check(!getRequest.empty() &&
                    lowerGet.find("accept-encoding") == std::string::npos,
                "a download should not ask for compression");
+    // Without it, IIS saves the output of a script instead of the script.
+    test.check(lowerGet.find("\r\ntranslate: f\r\n") != std::string::npos,
+               "a download should ask IIS for the file itself");
 }
 
 OPENSCP_TEST(testVerifiedWebDavRefusesAnUntrustedCertificate, test) {

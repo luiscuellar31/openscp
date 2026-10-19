@@ -15,6 +15,7 @@
 #include <cstring>
 #include <ctime>
 #include <limits>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <sstream>
@@ -692,6 +693,11 @@ bool CurlWebDavClient::get(
 
     std::optional<std::uint32_t> retryAfter;
     const std::string url = buildWebDavUrl(opt, remote);
+    // IIS sends a script such as default.aspx as a file, instead of running
+    // it, only when asked this way, as Windows' own WebDAV client does.
+    const std::unique_ptr<curl_slist, decltype(&curl_slist_free_all)>
+        asFileHeader(curl_slist_append(nullptr, "Translate: f"),
+                     &curl_slist_free_all);
     RemoteError failure;
     long rejectedStatus = 0;
     const auto download = [&] {
@@ -715,6 +721,9 @@ bool CurlWebDavClient::get(
                        curl_easy_setopt(curl, CURLOPT_ACCEPT_ENCODING,
                                         static_cast<char *>(nullptr)) ==
                            CURLE_OK &&
+                       asFileHeader &&
+                       curl_easy_setopt(curl, CURLOPT_HTTPHEADER,
+                                        asFileHeader.get()) == CURLE_OK &&
                        // The time comes from Last-Modified.
                        curl_easy_setopt(curl, CURLOPT_FILETIME, 1L) ==
                            CURLE_OK &&
