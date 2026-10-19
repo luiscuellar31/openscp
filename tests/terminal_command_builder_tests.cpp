@@ -408,6 +408,38 @@ OPENSCP_TEST(testWindowsScriptHoldsTheWindowAfterAnError, test) {
                "the window should wait for Enter");
 }
 
+OPENSCP_TEST(testWindowsScriptKeepsTheExitCodeOfAProgramThatEndsAtOnce, test) {
+    // Start-Process looked a program up again by its ID once it had started
+    // it, and missed one that had already ended, as ssh does at once when it
+    // cannot connect: the script got no exit code and did not fall back to
+    // sftp. On one CPU and below the probe's priority, the script lets the
+    // probe end first.
+    ProbeTools tools;
+    test.check(tools.create(), "the probe tools should be created");
+    const auto result =
+        tools.builder().prepare(session(), QStringLiteral("/"), false, true);
+    test.check(result.isValid() && result.hasSftpFallback,
+               "the script with its SFTP fallback should be built");
+
+    constexpr int kRounds = 40;
+    const QString rounds =
+        QStringLiteral(
+            "[Diagnostics.Process]::GetCurrentProcess().ProcessorAffinity = "
+            "[IntPtr]1; [Threading.Thread]::CurrentThread.Priority = "
+            "'Lowest'; foreach ($round in 1..%1) { %2 }")
+            .arg(QString::number(kRounds), result.command);
+    const ScriptRun run =
+        tools.run(rounds, {{QStringLiteral("OPENSCP_ARGV_PROBE_EXIT_SSH"),
+                            QStringLiteral("255")}});
+    test.check(run.finished, "the rounds should finish: " +
+                                 run.output.left(2000).toStdString());
+    test.check(run.programs.size() == 2 * kRounds &&
+                   !run.output.contains(QStringLiteral("exit code")),
+               "every round should get ssh's exit code and start sftp: " +
+                   std::to_string(run.programs.size()) + " programs started; " +
+                   run.output.left(2000).toStdString());
+}
+
 OPENSCP_TEST(testWindowsUsesTheNulDeviceAndNoNetworkHelpers, test) {
     auto unchecked = session();
     unchecked.known_hosts_policy = openscp::KnownHostsPolicy::Off;

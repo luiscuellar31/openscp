@@ -476,18 +476,22 @@ QString powerShellSingleQuote(const QString &value) {
 }
 
 // A PowerShell expression that runs a program in its console, waits for it
-// and gives its exit code. Start-Process takes the command line as written;
-// Windows PowerShell 5.1 would lose the quotes inside arguments passed
-// directly.
+// and gives its exit code. The command line goes as written; Windows
+// PowerShell 5.1 would lose the quotes inside arguments passed directly.
+// Process.Start keeps the process it creates, while Start-Process looks it up
+// again by its ID and misses one that has already ended, as ssh does at once
+// when it cannot connect.
 QString powerShellExitCodeOf(const QStringList &command) {
     QStringList arguments;
     for (qsizetype i = 1; i < command.size(); ++i)
         arguments << windowsCommandLineArgument(command.at(i));
-    return QStringLiteral("(Start-Process -FilePath ") +
+    return QStringLiteral("& { $process = [Diagnostics.Process]::Start("
+                          "[Diagnostics.ProcessStartInfo]@{ FileName = ") +
            powerShellSingleQuote(QDir::toNativeSeparators(command.front())) +
-           QStringLiteral(" -ArgumentList ") +
+           QStringLiteral("; Arguments = ") +
            powerShellSingleQuote(arguments.join(QLatin1Char(' '))) +
-           QStringLiteral(" -NoNewWindow -Wait -PassThru).ExitCode");
+           QStringLiteral("; UseShellExecute = $false }); "
+                          "$process.WaitForExit(); $process.ExitCode }");
 }
 
 // The script the new console runs: ssh, then sftp if ssh could not connect,
