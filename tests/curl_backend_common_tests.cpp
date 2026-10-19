@@ -36,6 +36,7 @@
 #include <openssl/x509v3.h>
 
 #include <algorithm>
+#include <cctype>
 #include <csignal>
 #include <cstdint>
 #include <cstdio>
@@ -43,6 +44,7 @@
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <iterator>
 #include <memory>
 #include <new>
 #include <optional>
@@ -1145,6 +1147,116 @@ OPENSCP_TEST(testWebDavKeyProbeSendsNoRequest, test) {
     }
     test.check(pinned.received.starts_with("PROPFIND "),
                "the pinned key should let the request through");
+}
+
+// Reads one HTTP request: its header block, then the body that Content-Length
+// announces. Empty once the client closes or goes quiet.
+std::string readHttpRequest(curl_socket_t socket) {
+    std::string request;
+    char character = 0;
+    while (request.find("\r\n\r\n") == std::string::npos) {
+        if (::recv(socket, &character, 1, 0) != 1)
+            return {};
+        request.push_back(character);
+    }
+    std::string lower = request;
+    std::transform(
+        lower.begin(), lower.end(), lower.begin(),
+        [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    const std::size_t field = lower.find("\r\ncontent-length:");
+    const std::size_t length =
+        field == std::string::npos
+            ? 0
+            : static_cast<std::size_t>(
+                  std::strtoul(request.c_str() + field + 17, nullptr, 10));
+    for (std::size_t i = 0; i < length; ++i) {
+        if (::recv(socket, &character, 1, 0) != 1)
+            return {};
+        request.push_back(character);
+    }
+    return request;
+}
+
+void sendHttpReply(curl_socket_t socket, const std::string &reply) {
+#ifdef _WIN32
+    (void)::send(socket, reply.data(), static_cast<int>(reply.size()), 0);
+#else
+    (void)::send(socket, reply.data(), reply.size(), 0);
+#endif
+}
+
+// Apache serves a .gz with "Content-Encoding: x-gzip"; decoding it saved the
+// archive's contents under the archive's name.
+OPENSCP_TEST(testWebDavDownloadsKeepTheBytesTheServerSent, test) {
+    const std::string compressed("\x1f\x8b\x08\x00\x00\x00\x00\x00\x02\xff"
+                                 "\xcb\x48\xcd\xc9\xc9\xe7\x02\x00\x20\x30"
+                                 "\x3a\x36\x06\x00\x00\x00",
+                                 26); // "hello\n" in gzip
+    const std::string multistatus =
+        "<?xml version=\"1.0\"?><d:multistatus xmlns:d=\"DAV:\"><d:response>"
+        "<d:href>/</d:href><d:propstat><d:prop><d:resourcetype>"
+        "<d:collection/></d:resourcetype></d:prop>"
+        "<d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>"
+        "</d:multistatus>";
+    openscp::testsupport::IntegrationTempDir directory;
+    if (!directory.isValid()) {
+        test.check(false, "the download test should create its directory");
+        return;
+    }
+    const std::filesystem::path local = directory.path() / "archive.tar.gz";
+    std::string getRequest;
+    std::string error;
+    bool downloaded = false;
+    {
+        LoopbackServer server([&](curl_socket_t socket) {
+            for (;;) {
+                const std::string request = readHttpRequest(socket);
+                if (request.empty())
+                    return;
+                if (request.starts_with("GET ")) {
+                    getRequest = request;
+                    sendHttpReply(socket,
+                                  "HTTP/1.1 200 OK\r\n"
+                                  "Content-Encoding: x-gzip\r\n"
+                                  "Content-Length: " +
+                                      std::to_string(compressed.size()) +
+                                      "\r\n\r\n" + compressed);
+                    return;
+                }
+                sendHttpReply(socket, "HTTP/1.1 207 Multi-Status\r\n"
+                                      "Content-Type: application/xml\r\n"
+                                      "Content-Length: " +
+                                          std::to_string(multistatus.size()) +
+                                          "\r\n\r\n" + multistatus);
+            }
+        });
+        test.check(server.listening(), "the WebDAV server should listen");
+        openscp::SessionOptions options;
+        options.protocol = openscp::Protocol::WebDav;
+        options.webdav_scheme = openscp::WebDavScheme::Http;
+        options.host = "127.0.0.1";
+        options.port = server.port();
+        options.username = "user";
+        options.password = "secret";
+        openscp::CurlWebDavClient client;
+        test.checkWithError(client.connect(options, error),
+                            "the WebDAV client should connect: ", error);
+        downloaded =
+            client.get("/archive.tar.gz", local.string(), error, {}, {}, false);
+    }
+    test.checkWithError(downloaded, "the download should succeed: ", error);
+    std::ifstream saved(local, std::ios::binary);
+    const std::string bytes((std::istreambuf_iterator<char>(saved)),
+                            std::istreambuf_iterator<char>());
+    test.check(bytes == compressed,
+               "a download should keep the bytes the server sent");
+    std::string lowerGet = getRequest;
+    std::transform(
+        lowerGet.begin(), lowerGet.end(), lowerGet.begin(),
+        [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    test.check(!getRequest.empty() &&
+                   lowerGet.find("accept-encoding") == std::string::npos,
+               "a download should not ask for compression");
 }
 
 OPENSCP_TEST(testVerifiedWebDavRefusesAnUntrustedCertificate, test) {
