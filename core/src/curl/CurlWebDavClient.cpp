@@ -710,6 +710,11 @@ bool CurlWebDavClient::get(
                            CURLE_OK &&
                        curl_easy_setopt(curl, CURLOPT_HTTPGET, 1L) ==
                            CURLE_OK &&
+                       // A file arrives byte for byte, even a .gz that the
+                       // server marks with Content-Encoding.
+                       curl_easy_setopt(curl, CURLOPT_ACCEPT_ENCODING,
+                                        static_cast<char *>(nullptr)) ==
+                           CURLE_OK &&
                        // The time comes from Last-Modified.
                        curl_easy_setopt(curl, CURLOPT_FILETIME, 1L) ==
                            CURLE_OK &&
