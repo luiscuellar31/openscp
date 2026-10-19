@@ -4,6 +4,7 @@
 
 #include "../common/RemoteListingLimits.hpp"
 #include "common/UniqueFile.hpp"
+#include "detail/HostKeyBlob.hpp"
 #include "detail/KnownHostsFile.hpp"
 #include "detail/Libssh2CipherPreference.hpp"
 #include "detail/Libssh2ErrorClassifier.hpp"
@@ -2581,9 +2582,15 @@ bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions &opt,
                 fpStr = oss.str();
             }
 #endif
-            // Bits (approx): length of raw hostkey bytes
+            // The key size as ssh-keygen -l shows it.
             int keyBits = 0;
             switch (keytype) {
+            case LIBSSH2_HOSTKEY_TYPE_RSA:
+                keyBits = libssh2detail::rsaModulusBits(
+                    reinterpret_cast<const unsigned char *>(hostkey), keylen);
+                if (keyBits == 0)
+                    keyBits = static_cast<int>(keylen) * 8;
+                break;
             case LIBSSH2_HOSTKEY_TYPE_ED25519:
             case LIBSSH2_HOSTKEY_TYPE_ECDSA_256:
                 keyBits = 256;
