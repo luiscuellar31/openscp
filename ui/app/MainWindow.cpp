@@ -143,6 +143,10 @@ void configurePanelTreeView(QTreeView *view, QAbstractItemModel *model,
     view->setRootIndex(rootIndex);
     view->setSelectionMode(QAbstractItemView::ExtendedSelection);
     view->setSelectionBehavior(QAbstractItemView::SelectRows);
+    // Every row is one line. Otherwise each listing makes the view measure
+    // all of its rows, which stalls big folders where it scrolls by pixel, as
+    // on macOS.
+    view->setUniformRowHeights(true);
     view->setSortingEnabled(true);
     view->sortByColumn(0, Qt::AscendingOrder);
     view->header()->setStretchLastSection(true);
