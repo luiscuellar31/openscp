@@ -377,9 +377,11 @@ OPENSCP_TEST(testWindowsScriptPassesExactArguments, test) {
                "ssh and then sftp should receive exactly these arguments: " +
                    describe(run.programs).toStdString());
     test.check(run.output.contains(QStringLiteral("Falling back to SFTP CLI")),
-               "the script should say that it falls back to SFTP");
+               "the script should say that it falls back to SFTP: " +
+                   run.output.toStdString());
     test.check(!run.output.contains(QStringLiteral("exit code")),
-               "a session that ends well should not hold the window open");
+               "a session that ends well should not hold the window open: " +
+                   run.output.toStdString());
 }
 
 OPENSCP_TEST(testWindowsScriptHoldsTheWindowAfterAnError, test) {
