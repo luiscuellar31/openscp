@@ -55,8 +55,11 @@ void TransferQueueWriter::shutdown() {
         // A warning raised while the owner is going away has nowhere to go.
         onWarning_ = {};
         onFailure_ = {};
+        // Under the lock, so the stop cannot fall between the writer's check
+        // for it and its wait, where the wake below would be missed and the
+        // join would never return.
+        thread_.request_stop();
     }
-    thread_.request_stop();
     wake_.notify_all();
     if (thread_.joinable())
         thread_.join();
