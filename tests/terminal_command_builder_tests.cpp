@@ -90,6 +90,48 @@ OPENSCP_TEST(testSeparatesDestinationsFromOptions, test) {
                    "'--' '-oProxyCommand=touch pwned@files.example:/'")),
                "sftp should get its destination after --");
 }
+
+OPENSCP_TEST(testIpv6AddressesTakeTheFormEachProgramReads, test) {
+    // ssh looked "[2001:db8::1]" up as a name, and sftp cut a bare address
+    // at its first colon.
+    for (const char *written : {"[2001:db8::1]", "2001:db8::1"}) {
+        auto options = session();
+        options.host = written;
+        const auto result =
+            builder().prepare(options, QStringLiteral("/srv"), false, true);
+        test.check(result.command.contains(
+                       QStringLiteral("'--' 'alice@2001:db8::1' 'exec ")),
+                   "ssh should get the address without brackets");
+        test.check(result.command.contains(
+                       QStringLiteral("'--' 'alice@[2001:db8::1]:/srv'")),
+                   "sftp should get the address in brackets");
+    }
+
+    // A jump host without its own key goes through -J, and one with a key
+    // through a ProxyCommand whose -W gets the target from %h.
+    for (const char *written : {"[2001:db8::2]", "2001:db8::2"}) {
+        auto options = session();
+        options.host = "2001:db8::1";
+        options.jump_host = written;
+        options.jump_username = "ops";
+        options.jump_port = 2222;
+        const auto result =
+            builder().prepare(options, QStringLiteral("/"), false, false);
+        test.check(result.command.contains(
+                       QStringLiteral("'-J' 'ops@[2001:db8::2]:2222'")),
+                   "-J should get an IPv6 jump host in brackets");
+        options.jump_private_key_path = "/keys/jump";
+        const auto keyed =
+            builder().prepare(options, QStringLiteral("/"), false, false);
+        test.check(keyed.command.contains(QStringLiteral(
+                       "'\"'\"'-W'\"'\"' '\"'\"'[%h]:%p'\"'\"'")),
+                   "-W should get the target host in brackets");
+        test.check(
+            keyed.command.contains(QStringLiteral("'\"'\"'--'\"'\"' "
+                                                  "'\"'\"'2001:db8::2'\"'\"'")),
+            "ssh should get the jump address without brackets");
+    }
+}
 #endif
 
 OPENSCP_TEST(testRejectsNamesThatOpenSshWouldMisread, test) {
@@ -489,7 +531,7 @@ OPENSCP_TEST(testWindowsJumpKeyGoesThroughAQuotedProxyCommand, test) {
     const QString proxyCommand =
         QStringLiteral("ProxyCommand=\"") +
         QDir::toNativeSeparators(tools.ssh) +
-        QStringLiteral("\" -W %h:%p -p 22 -l ops -i C:/keys/100%% -o "
+        QStringLiteral("\" -W \"[%h]:%p\" -p 22 -l ops -i C:/keys/100%% -o "
                        "IdentitiesOnly=yes -- jump.example");
     const QStringList ssh = run.programs.value(0);
     test.check(ssh.value(0) == QStringLiteral("SSH") &&

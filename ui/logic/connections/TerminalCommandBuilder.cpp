@@ -34,6 +34,15 @@ QString shellSingleQuote(const QString &value) {
     return QStringLiteral("'") + escaped + QStringLiteral("'");
 }
 
+// ssh looks "[2001:db8::1]" up as a name, brackets and all.
+QString withoutIpv6Brackets(const QString &host) {
+    if (host.size() >= 2 && host.startsWith(QLatin1Char('[')) &&
+        host.endsWith(QLatin1Char(']'))) {
+        return host.mid(1, host.size() - 2);
+    }
+    return host;
+}
+
 // Whether ssh can take `name` as a host or user name: one that starts with '-'
 // would be read as an option, and spaces or `forbidden` characters would
 // break out of the command line that ssh builds around it.
@@ -258,7 +267,12 @@ bool appendJumpOrProxyArguments(
         }
 
         if (jumpPrivateKey.isEmpty()) {
-            QString jumpSpecification = jumpHost;
+            // -J reads an IPv6 address only in brackets, as host:port does.
+            QString jumpSpecification = withoutIpv6Brackets(jumpHost);
+            if (jumpSpecification.contains(QLatin1Char(':'))) {
+                jumpSpecification =
+                    QLatin1Char('[') + jumpSpecification + QLatin1Char(']');
+            }
             if (!jumpUser.isEmpty()) {
                 jumpSpecification =
                     jumpUser + QStringLiteral("@") + jumpSpecification;
@@ -271,9 +285,11 @@ bool appendJumpOrProxyArguments(
             return true;
         }
 
+        // %h is the host without brackets, so -W gets them back, as in the
+        // command that ssh's own -J runs.
         QStringList jumpCommand{
             QStringLiteral("ssh"),     QStringLiteral("-W"),
-            QStringLiteral("%h:%p"),   QStringLiteral("-p"),
+            QStringLiteral("[%h]:%p"), QStringLiteral("-p"),
             QString::number(jumpPort),
         };
         if (!jumpUser.isEmpty())
@@ -283,7 +299,7 @@ bool appendJumpOrProxyArguments(
                            QDir::cleanPath(jumpPrivateKey)))
                     << QStringLiteral("-o")
                     << QStringLiteral("IdentitiesOnly=yes")
-                    << QStringLiteral("--") << jumpHost;
+                    << QStringLiteral("--") << withoutIpv6Brackets(jumpHost);
 #ifdef Q_OS_WIN
         // OpenSSH for Windows starts a proxy command with CreateProcessW, not
         // through a shell: the command is quoted for the C runtime and names
@@ -317,7 +333,7 @@ bool appendJumpOrProxyArguments(
 
 bool validateSession(const openscp::SessionOptions &session, QString *host,
                      QString *user, QString *error) {
-    *host = QString::fromStdString(session.host).trimmed();
+    *host = withoutIpv6Brackets(QString::fromStdString(session.host).trimmed());
     *user = QString::fromStdString(session.username).trimmed();
     if (host->isEmpty() || user->isEmpty()) {
         *error = QCoreApplication::translate(
@@ -404,6 +420,9 @@ bool buildSftpArguments(const openscp::SessionOptions &session,
     if (!appendJumpOrProxyArguments(arguments, session, lookup, error))
         return false;
 
+    // sftp cuts a bare IPv6 address at its first colon.
+    if (host.contains(QLatin1Char(':')))
+        host = QLatin1Char('[') + host + QLatin1Char(']');
     arguments << QStringLiteral("--")
               << QStringLiteral("%1@%2:%3")
                      .arg(user, host, normalizeRemotePath(remotePath));
