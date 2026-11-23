@@ -1122,8 +1122,17 @@ class RemoteOperationController::Impl {
         });
     }
 
-    void postMutationProgress(const Job &job, const RunSummary &summary,
-                              const QString &path) {
+    // At most every 100 ms, as the other walks report: a recursive deletion
+    // or chmod finishes an entry per call, faster than the UI can show them.
+    // The job's result carries the final counts.
+    void
+    postMutationProgress(const Job &job, const RunSummary &summary,
+                         const QString &path,
+                         std::chrono::steady_clock::time_point &lastProgress) {
+        const auto now = std::chrono::steady_clock::now();
+        if (now - lastProgress < std::chrono::milliseconds(100))
+            return;
+        lastProgress = now;
         postProgress(Progress{job.key, path, summary.visitedEntries,
                               summary.matchedEntries, summary.affectedEntries,
                               summary.failedEntries});
@@ -1134,6 +1143,7 @@ class RemoteOperationController::Impl {
                                       const QString &root,
                                       std::stop_token stopToken) {
         RunSummary summary;
+        std::chrono::steady_clock::time_point lastProgress;
         RemoteTreeWalker walker(*client_);
         const RemoteTreeWalker::Options options = walkerOptionsFrom(
             request.traversal, RemoteTreeWalker::DepthPolicy::IncludeLimit);
@@ -1147,8 +1157,8 @@ class RemoteOperationController::Impl {
                 ++summary.visitedEntries;
                 return RemoteTreeWalker::Control::Continue;
             };
-        callbacks.onEntry = [this, &job, &request,
-                             &summary](const RemoteTreeWalker::Entry &entry) {
+        callbacks.onEntry = [this, &job, &request, &summary, &lastProgress](
+                                const RemoteTreeWalker::Entry &entry) {
             ++summary.visitedEntries;
             if (entry.info.is_dir && !entry.isSymlink)
                 return RemoteTreeWalker::Control::Continue;
@@ -1167,7 +1177,7 @@ class RemoteOperationController::Impl {
                 return RemoteTreeWalker::Control::Abort;
             }
             ++summary.affectedEntries;
-            postMutationProgress(job, summary, entry.path);
+            postMutationProgress(job, summary, entry.path, lastProgress);
             return RemoteTreeWalker::Control::Continue;
         };
         callbacks.onSkippedSymlink =
@@ -1214,7 +1224,8 @@ class RemoteOperationController::Impl {
             summary.partial = summary.affectedEntries > 0;
             return RemoteTreeWalker::Control::Abort;
         };
-        callbacks.onLeaveDirectory = [this, &job, &request, &summary](
+        callbacks.onLeaveDirectory = [this, &job, &request, &summary,
+                                      &lastProgress](
                                          const RemoteTreeWalker::Entry &entry) {
             std::string removeError;
             if (!client_->removeDir(entry.path.toStdString(), removeError)) {
@@ -1230,7 +1241,7 @@ class RemoteOperationController::Impl {
                 return RemoteTreeWalker::Control::Abort;
             }
             ++summary.affectedEntries;
-            postMutationProgress(job, summary, entry.path);
+            postMutationProgress(job, summary, entry.path, lastProgress);
             return RemoteTreeWalker::Control::Continue;
         };
 
@@ -1257,11 +1268,12 @@ class RemoteOperationController::Impl {
                                      const QString &root,
                                      std::stop_token stopToken) {
         RunSummary summary;
+        std::chrono::steady_clock::time_point lastProgress;
         RemoteTreeWalker walker(*client_);
         const RemoteTreeWalker::Options options = walkerOptionsFrom(
             request.traversal, RemoteTreeWalker::DepthPolicy::IncludeLimit);
 
-        const auto applyMode = [this, &job, &request, &summary](
+        const auto applyMode = [this, &job, &request, &summary, &lastProgress](
                                    const RemoteTreeWalker::Entry &entry) {
             std::string chmodError;
             if (!client_->chmod(entry.path.toStdString(), request.mode,
@@ -1275,7 +1287,7 @@ class RemoteOperationController::Impl {
                 ++summary.affectedEntries;
             }
             ++summary.visitedEntries;
-            postMutationProgress(job, summary, entry.path);
+            postMutationProgress(job, summary, entry.path, lastProgress);
             return RemoteTreeWalker::Control::Continue;
         };
 
