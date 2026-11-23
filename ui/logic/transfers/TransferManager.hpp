@@ -181,7 +181,14 @@ class TransferManager : public QObject {
     static constexpr int kPersistenceMaxRetryMs = 5 * 60 * 1000;
 
     struct WorkerSlot;
-    enum class PrecheckOutcome { Continue, Skipped, Canceled, Error };
+    // LocalError: the local file system failed, not the server.
+    enum class PrecheckOutcome {
+        Continue,
+        Skipped,
+        Canceled,
+        Error,
+        LocalError
+    };
 
     ConnectionFactory openConnection_;
     // Stops the connections being opened for the current session; replaced

@@ -1661,6 +1661,55 @@ OPENSCP_TEST(testLeftoverInterruptDoesNotStopTheNextTask, test) {
                "interrupt left by the first");
 }
 
+class StaleErrorClient final : public DownloadMockClient {
+    public:
+    bool connect(const openscp::SessionOptions &options,
+                 std::string &err) override {
+        if (!DownloadMockClient::connect(options, err))
+            return false;
+        // The last error of an earlier task: transient, from a server that
+        // asked to wait before the next try.
+        setLastOperationError(openscp::RemoteErrorKind::RemoteIo, "busy", 0,
+                              true, false, 1);
+        return true;
+    }
+
+    std::unique_ptr<openscp::RemoteClient>
+    openConnection(const openscp::SessionOptions &options, std::string &err) {
+        return makeConnectedWorker<StaleErrorClient>(options, err);
+    }
+};
+
+OPENSCP_TEST(testLocalFailuresIgnoreTheConnectionsLastError, test) {
+    // A local failure took the worker connection's last remote error, so one
+    // that an earlier task left transient retried it, waiting as long as
+    // that server's Retry-After asked.
+    StaleErrorClient baseClient;
+    TransferManager manager;
+    manager.setMaxConcurrent(1);
+    configureManager(manager, baseClient, testOptions());
+    QTemporaryDir root;
+    // A file where a folder should be, so nothing can be made under it.
+    QFile blocker(root.filePath("blocker"));
+    test.check(blocker.open(QIODevice::WriteOnly),
+               "the blocking file should be created");
+    blocker.close();
+    auto batch = testBatchOptions();
+    const quint64 folderId =
+        manager.enqueueLocalDirectory(root.filePath("blocker/folder"), batch);
+    const quint64 downloadId = manager.enqueueDownload(
+        QStringLiteral("/remote/file"), root.filePath("blocker/file"), batch);
+    test.check(
+        waitForStatus(manager, folderId, TransferTask::Status::Error) &&
+            waitForStatus(manager, downloadId, TransferTask::Status::Error),
+        "both local failures should end in an error");
+    const auto folder = manager.taskSnapshot(folderId);
+    const auto download = manager.taskSnapshot(downloadId);
+    test.check(folder && folder->attempts == 1 && download &&
+                   download->attempts == 1,
+               "a local failure should not be retried");
+}
+
 OPENSCP_TEST(testClearSessionInvalidatesWorkerConnections, test) {
     auto probe = std::make_shared<LifecycleProbe>();
     CancelLifecycleClient baseClient(probe);

@@ -159,6 +159,15 @@ bool existsUnderAnotherName(const QFileInfo &info) {
                info.fileName().normalized(QString::NormalizationForm_C);
 }
 
+// A failure of the local file system. The worker connection's last error may
+// belong to an earlier task, and a transient one would retry this one.
+openscp::RemoteError localFailure(const std::string &message) {
+    openscp::RemoteError error;
+    error.kind = openscp::RemoteErrorKind::LocalIo;
+    error.message = message;
+    return error;
+}
+
 } // namespace
 
 // The single arg() call keeps a "%1" in the name from being replaced.
@@ -2433,7 +2442,7 @@ TransferManager::PrecheckOutcome TransferManager::precheckTask(
             // file on Windows and macOS. Whatever the policy, the download
             // takes a free name, so that neither file replaces the other.
             if (!chooseRenamedDestination(task, workerClient, err))
-                return PrecheckOutcome::Error;
+                return PrecheckOutcome::LocalError;
             publishUpdated({task.taskId});
             resume = false;
         } else if (localInfo.exists()) {
@@ -2469,7 +2478,7 @@ TransferManager::PrecheckOutcome TransferManager::precheckTask(
                 return PrecheckOutcome::Skipped;
             if (decision.policy == Policy::Rename) {
                 if (!chooseRenamedDestination(task, workerClient, err))
-                    return PrecheckOutcome::Error;
+                    return PrecheckOutcome::LocalError;
                 publishUpdated({task.taskId});
             }
             resume = decision.policy == Policy::Resume ||
@@ -2485,7 +2494,7 @@ TransferManager::PrecheckOutcome TransferManager::precheckTask(
                       .toUtf8()
                       .toStdString() +
                   ": " + directoryError;
-            return PrecheckOutcome::Error;
+            return PrecheckOutcome::LocalError;
         }
     }
     const bool canResume = task.type == TransferTask::Type::Upload
@@ -2717,18 +2726,26 @@ void TransferManager::executeTask(WorkerSlot &slot, TransferTask task,
                 finish();
                 return;
             }
-            failed = outcome == PrecheckOutcome::Error;
+            failed = outcome == PrecheckOutcome::Error ||
+                     outcome == PrecheckOutcome::LocalError;
             prechecked = !failed;
             if (failed && client)
-                operationError = client->lastOperationError();
+                operationError = outcome == PrecheckOutcome::LocalError
+                                     ? localFailure(error)
+                                     : client->lastOperationError();
         }
 
         if (!failed && task.phase == TransferPhase::Transfer) {
             transferStarted = QDateTime::currentMSecsSinceEpoch();
             failed = !runTransferAttempt(task, client, slot.taskSignals, resume,
                                          error);
+            const bool localTask =
+                task.type == TransferTask::Type::CreateLocalDirectory ||
+                task.type == TransferTask::Type::DeleteLocalFile ||
+                task.type == TransferTask::Type::DeleteLocalDirectory;
             if (failed)
-                operationError = client->lastOperationError();
+                operationError = localTask ? localFailure(error)
+                                           : client->lastOperationError();
             if (failed &&
                 (task.type == TransferTask::Type::DeleteRemoteFile ||
                  task.type == TransferTask::Type::DeleteRemoteDirectory) &&
