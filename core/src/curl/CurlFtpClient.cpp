@@ -989,6 +989,10 @@ void CurlFtpClient::interrupt() {
     state_->requestInterrupt();
 }
 
+void CurlFtpClient::clearInterrupt() {
+    state_->clearInterrupt();
+}
+
 bool CurlFtpClient::isConnected() const {
     return state_->isConnected();
 }

@@ -1595,6 +1595,72 @@ OPENSCP_TEST(testCanceledWorkerInvalidatesItsConnection, test) {
                "the task after cancellation must use a fresh connection");
 }
 
+struct LeftoverInterruptProbe {
+    std::atomic<bool> interrupted{false};
+    std::atomic<int> connections{0};
+};
+
+class LeftoverInterruptClient final : public DownloadMockClient {
+    public:
+    explicit LeftoverInterruptClient(
+        std::shared_ptr<LeftoverInterruptProbe> probe)
+        : probe_(std::move(probe)) {}
+
+    // Like the curl backends, an interrupt lasts until it is cleared.
+    void interrupt() override { probe_->interrupted.store(true); }
+    void clearInterrupt() override { probe_->interrupted.store(false); }
+
+    bool get(const std::string &remote, const std::string &, std::string &err,
+             std::function<void(std::size_t, std::size_t)> progress,
+             std::function<bool()>, bool) override {
+        if (probe_->interrupted.load()) {
+            err = "Interrupted";
+            setLastOperationError(openscp::RemoteErrorKind::Canceled, err);
+            return false;
+        }
+        if (progress)
+            progress(1, 1);
+        // A cancel that reaches the first download just as it ends.
+        if (remote == "/remote/first")
+            interrupt();
+        clearLastOperationError();
+        err.clear();
+        return true;
+    }
+
+    std::unique_ptr<openscp::RemoteClient>
+    openConnection(const openscp::SessionOptions &options, std::string &err) {
+        probe_->connections.fetch_add(1);
+        return makeConnectedWorker<LeftoverInterruptClient>(options, err,
+                                                            probe_);
+    }
+
+    private:
+    std::shared_ptr<LeftoverInterruptProbe> probe_;
+};
+
+OPENSCP_TEST(testLeftoverInterruptDoesNotStopTheNextTask, test) {
+    auto probe = std::make_shared<LeftoverInterruptProbe>();
+    LeftoverInterruptClient baseClient(probe);
+    TransferManager manager;
+    manager.setMaxConcurrent(1);
+    configureManager(manager, baseClient, testOptions());
+    QTemporaryDir destination;
+    auto batch = testBatchOptions();
+
+    const quint64 firstId = manager.enqueueDownload(
+        QStringLiteral("/remote/first"), destination.filePath("first"), batch);
+    const quint64 secondId =
+        manager.enqueueDownload(QStringLiteral("/remote/second"),
+                                destination.filePath("second"), batch);
+    test.check(waitForStatus(manager, firstId, TransferTask::Status::Done),
+               "the first download should finish");
+    test.check(waitForStatus(manager, secondId, TransferTask::Status::Done) &&
+                   probe->connections.load() == 1,
+               "the next task on that connection should not inherit an "
+               "interrupt left by the first");
+}
+
 OPENSCP_TEST(testClearSessionInvalidatesWorkerConnections, test) {
     auto probe = std::make_shared<LifecycleProbe>();
     CancelLifecycleClient baseClient(probe);

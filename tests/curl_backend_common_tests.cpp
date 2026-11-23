@@ -48,6 +48,7 @@
 #include <memory>
 #include <new>
 #include <optional>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -380,8 +381,14 @@ OPENSCP_TEST(testCurlClientState, test) {
 
     {
         auto nextOperation = state.beginOperation();
+        test.check(nextOperation.interrupted()->load(),
+                   "an interrupt should outlast the operation it came during");
+    }
+    state.clearInterrupt();
+    {
+        auto nextOperation = state.beginOperation();
         test.check(!nextOperation.interrupted()->load(),
-                   "completed curl operations should clear interruption state");
+                   "clearing the interrupt should let operations run again");
     }
     {
         std::string error;
@@ -959,11 +966,14 @@ TlsTestServerIdentity makeTlsTestServerIdentity() {
     return identity;
 }
 
-// Serves the first connection on a loopback port with `serve`. Reads on that
-// socket give up after two seconds, so a quiet client cannot hang the test.
+// Serves the first connection on a loopback port with `serve`, or with
+// `everyConnection` each one in turn, as for a client that connects again.
+// Reads on a socket give up after two seconds, so a quiet client cannot hang
+// the test.
 class LoopbackServer final {
     public:
-    explicit LoopbackServer(std::function<void(curl_socket_t socket)> serve) {
+    explicit LoopbackServer(std::function<void(curl_socket_t socket)> serve,
+                            bool everyConnection = false) {
 #ifdef _WIN32
         WSADATA winsock{};
         winsockStarted_ = ::WSAStartup(MAKEWORD(2, 2), &winsock) == 0;
@@ -991,25 +1001,32 @@ class LoopbackServer final {
         port_ = ntohs(address.sin_port);
         if (!listening_)
             return;
-        thread_ = std::thread([this, serve = std::move(serve)] {
-            const curl_socket_t client = ::accept(listener_, nullptr, nullptr);
-            if (client == CURL_SOCKET_BAD)
-                return;
+        thread_ =
+            std::thread([this, serve = std::move(serve), everyConnection] {
+                do {
+                    if (everyConnection && !waitForConnection())
+                        return;
+                    const curl_socket_t client =
+                        ::accept(listener_, nullptr, nullptr);
+                    if (client == CURL_SOCKET_BAD)
+                        return;
 #ifdef _WIN32
-            const DWORD timeout = 2000;
-            (void)::setsockopt(client, SOL_SOCKET, SO_RCVTIMEO,
-                               reinterpret_cast<const char *>(&timeout),
-                               sizeof(timeout));
+                    const DWORD timeout = 2000;
+                    (void)::setsockopt(client, SOL_SOCKET, SO_RCVTIMEO,
+                                       reinterpret_cast<const char *>(&timeout),
+                                       sizeof(timeout));
 #else
-            timeval timeout{2, 0};
-            (void)::setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, &timeout,
-                               sizeof(timeout));
+                    timeval timeout{2, 0};
+                    (void)::setsockopt(client, SOL_SOCKET, SO_RCVTIMEO,
+                                       &timeout, sizeof(timeout));
 #endif
-            serve(client);
-            closeTestSocket(client);
-        });
+                    serve(client);
+                    closeTestSocket(client);
+                } while (everyConnection);
+            });
     }
     ~LoopbackServer() {
+        stopping_.store(true);
 #ifdef _WIN32
         // Closing the listener ends an accept() still waiting in the thread,
         // which shutting it down does not on Windows.
@@ -1035,9 +1052,26 @@ class LoopbackServer final {
     [[nodiscard]] std::uint16_t port() const { return port_; }
 
     private:
+    // Waits in short steps, so that the destructor ends the wait on every
+    // platform; false once the server is going away.
+    bool waitForConnection() const {
+        while (!stopping_.load()) {
+            fd_set readable;
+            FD_ZERO(&readable);
+            FD_SET(listener_, &readable);
+            timeval step{0, 50000};
+            if (::select(static_cast<int>(listener_) + 1, &readable, nullptr,
+                         nullptr, &step) > 0) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     curl_socket_t listener_ = CURL_SOCKET_BAD;
     bool listening_ = false;
     std::uint16_t port_ = 0;
+    std::atomic<bool> stopping_{false};
     std::thread thread_;
 #ifdef _WIN32
     bool winsockStarted_ = false;
@@ -1321,6 +1355,32 @@ std::string readPlainLine(curl_socket_t socket) {
     return line;
 }
 
+// Serves an FTP control connection: greets, takes any login, answers PWD and
+// QUIT, and answers every other command with what `answer` returns for it,
+// or with 502 when that is empty.
+void serveFakeFtp(
+    curl_socket_t socket,
+    const std::function<std::string(const std::string &)> &answer) {
+    sendReply(socket, "220 test\r\n");
+    for (std::string line = readPlainLine(socket); !line.empty();
+         line = readPlainLine(socket)) {
+        if (line.starts_with("USER ")) {
+            sendReply(socket, "331 password\r\n");
+        } else if (line.starts_with("PASS ")) {
+            sendReply(socket, "230 logged in\r\n");
+        } else if (line == "PWD") {
+            sendReply(socket, "257 \"/\" is the current directory\r\n");
+        } else if (line == "QUIT") {
+            sendReply(socket, "221 bye\r\n");
+            return;
+        } else {
+            const std::string reply = answer(line);
+            sendReply(socket,
+                      reply.empty() ? "502 not implemented\r\n" : reply);
+        }
+    }
+}
+
 std::string readTlsLine(SSL *ssl) {
     std::string line;
     char character = 0;
@@ -1433,6 +1493,130 @@ OPENSCP_TEST(testVerifiedFtpsRefusesAnUntrustedCertificate, test) {
     test.check(commands.empty(),
                "no command, and so no password, should follow a failed "
                "verification");
+}
+
+OPENSCP_TEST(testFtpInterruptStopsLaterOperationsUntilCleared, test) {
+    // A cancel that came just before an operation, or between two, was
+    // forgotten when the next one began, so it ran to the end: with a slow
+    // server, until a timeout.
+    std::vector<std::string> created;
+    openscp::RemoteError interrupted;
+    bool firstRan = true;
+    bool secondRan = true;
+    bool thirdRan = false;
+    std::string error;
+    {
+        LoopbackServer server([&](curl_socket_t socket) {
+            serveFakeFtp(socket, [&](const std::string &line) -> std::string {
+                if (!line.starts_with("MKD "))
+                    return {};
+                created.push_back(line.substr(4));
+                return "257 created\r\n";
+            });
+        });
+        test.check(server.listening(), "the FTP server should listen");
+        openscp::SessionOptions options;
+        options.protocol = openscp::Protocol::Ftp;
+        options.host = "127.0.0.1";
+        options.port = server.port();
+        options.username = "user";
+        options.password = "secret";
+        openscp::CurlFtpClient client(openscp::Protocol::Ftp);
+        test.checkWithError(client.connect(options, error),
+                            "the FTP server should accept the login: ", error);
+        client.interrupt();
+        firstRan = client.mkdir("/first", error);
+        interrupted = client.lastOperationError();
+        secondRan = client.mkdir("/second", error);
+        client.clearInterrupt();
+        thirdRan = client.mkdir("/third", error);
+        client.disconnect();
+    }
+    test.check(!firstRan && !secondRan &&
+                   interrupted.kind == openscp::RemoteErrorKind::Canceled,
+               "an interrupt should stop the operations that follow it");
+    test.check(thirdRan && created == std::vector<std::string>{"/third"},
+               "operations should run again once the interrupt is cleared");
+}
+
+OPENSCP_TEST(testFtpReplacesAFileWhereRntoRefusesTo, test) {
+    // IIS refuses RNTO over a file, so the old one is moved aside first. A
+    // pause that came just then left it aside, with nothing in its place, and
+    // a second refusal must bring it back.
+    enum class Case { Replaced, PausedWhileAside, RefusedAgain };
+    for (const Case testCase :
+         {Case::Replaced, Case::PausedWhileAside, Case::RefusedAgain}) {
+        std::set<std::string> names{"/file", "/file.part"};
+        openscp::CurlFtpClient client(openscp::Protocol::Ftp);
+        bool replaced = false;
+        std::string error;
+        {
+            std::string renamed;
+            const auto answer = [&](const std::string &line) -> std::string {
+                const std::string path =
+                    line.size() > 5 ? line.substr(5) : std::string();
+                if (line.starts_with("MLST ")) {
+                    return names.contains(path)
+                               ? "250-Listing\r\n type=file;size=1; " + path +
+                                     "\r\n250 End\r\n"
+                               : "550 not found\r\n";
+                }
+                if (line.starts_with("RNFR ")) {
+                    renamed = path;
+                    return names.contains(path) ? "350 ready\r\n"
+                                                : "550 not found\r\n";
+                }
+                if (line.starts_with("RNTO ")) {
+                    if (names.contains(path) ||
+                        (testCase == Case::RefusedAgain &&
+                         renamed == "/file.part"))
+                        return "550 refused\r\n";
+                    names.erase(renamed);
+                    names.insert(path);
+                    if (testCase == Case::PausedWhileAside && path != "/file")
+                        client.interrupt();
+                    return "250 renamed\r\n";
+                }
+                if (line.starts_with("DELE ")) {
+                    names.erase(path);
+                    return "250 deleted\r\n";
+                }
+                return {};
+            };
+            // libcurl connects again after a command the server refuses.
+            LoopbackServer server(
+                [&](curl_socket_t socket) { serveFakeFtp(socket, answer); },
+                true);
+            test.check(server.listening(), "the FTP server should listen");
+            openscp::SessionOptions options;
+            options.protocol = openscp::Protocol::Ftp;
+            options.host = "127.0.0.1";
+            options.port = server.port();
+            options.username = "user";
+            options.password = "secret";
+            test.checkWithError(
+                client.connect(options, error),
+                "the FTP server should accept the login: ", error);
+            replaced = client.rename("/file.part", "/file", error, true);
+            client.disconnect();
+        }
+        if (testCase == Case::RefusedAgain) {
+            test.check(
+                !replaced &&
+                    names == std::set<std::string>{"/file", "/file.part"} &&
+                    error.find("[old destination restored]") !=
+                        std::string::npos,
+                "a second refusal should put the old file back: " + error);
+        } else {
+            test.checkWithError(
+                replaced && names == std::set<std::string>{"/file"},
+                testCase == Case::PausedWhileAside
+                    ? "a pause while the old file is aside should not leave "
+                      "it there: "
+                    : "the file should be replaced with nothing left aside: ",
+                error);
+        }
+    }
 }
 #endif
 

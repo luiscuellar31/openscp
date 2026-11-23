@@ -57,7 +57,6 @@ class CurlClientState final {
         Operation &operator=(const Operation &) = delete;
         Operation(Operation &&other) noexcept;
         Operation &operator=(Operation &&) = delete;
-        ~Operation();
 
         [[nodiscard]] bool disconnecting() const noexcept;
         [[nodiscard]] std::atomic<bool> *interrupted() const noexcept;
@@ -116,7 +115,10 @@ class CurlClientState final {
                           std::unique_ptr<CurlEasySession> session,
                           std::string commandRoot = "/");
     void disconnect(SessionOptions defaultOptions);
+    // The interrupt lasts until clearInterrupt() or disconnect(), so one
+    // that arrives before or between operations still stops them.
     void requestInterrupt() noexcept;
+    void clearInterrupt() noexcept;
     [[nodiscard]] bool isConnected() const;
     [[nodiscard]] CurlConnectionSnapshot
     snapshot(const Operation &operation) const;

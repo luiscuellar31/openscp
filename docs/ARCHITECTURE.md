@@ -137,10 +137,13 @@ They count newly canceled jobs once; generation-specific cancellation leaves
 other generations untouched. Interrupting can drop the control connection, as
 SFTP does, so work that is only replaced (a newer listing, a search at its
 match limit, a sync scan over its size limit) cancels without interrupting
-and lets the active call finish. The main window does not replace a listing
-with a refresh of the same folder: the refresh runs once after it, and the
-view stays usable meanwhile, so uploads that keep finishing cannot keep every
-listing from showing.
+and lets the active call finish. The FTP and WebDAV backends keep an
+interrupt until `clearInterrupt()`, which the controller and each transfer
+worker call before starting work, so an interrupt that arrives between two of
+a job's calls still stops the next one. The main window does not replace a
+listing with a refresh of the same folder: the refresh runs once after it, and
+the view stays usable meanwhile, so uploads that keep finishing cannot keep
+every listing from showing.
 `RemoteTreeWalker` and `LocalTreeDiscovery` scan directories outside the UI
 thread and can be canceled. Deleting a remote folder removes the links inside
 it as entries and never follows them.

@@ -27,6 +27,7 @@ class CurlWebDavClient : public RemoteClient {
     bool connect(const SessionOptions &opt, std::string &err) override;
     void disconnect() override;
     void interrupt() override;
+    void clearInterrupt() override;
     bool isConnected() const override;
 
     bool list(const std::string &remote_path, std::vector<FileInfo> &out,

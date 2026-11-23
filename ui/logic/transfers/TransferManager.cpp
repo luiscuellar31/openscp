@@ -1207,6 +1207,13 @@ void TransferManager::workerLoop(std::size_t slotIndex,
             invalidateWorkerClient(slot);
             continue;
         }
+        {
+            // An interrupt for the previous task must not stop this one;
+            // interruptTask() reaches this one once activeTaskId names it.
+            std::lock_guard<std::mutex> lock(slot.clientMutex);
+            if (slot.client)
+                slot.client->clearInterrupt();
+        }
         slot.activeTaskId.store(task->taskId);
         publishUpdated({task->taskId});
         executeTask(slot, std::move(*task), stopToken);

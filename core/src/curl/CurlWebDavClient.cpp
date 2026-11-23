@@ -581,6 +581,10 @@ void CurlWebDavClient::interrupt() {
     state_->requestInterrupt();
 }
 
+void CurlWebDavClient::clearInterrupt() {
+    state_->clearInterrupt();
+}
+
 bool CurlWebDavClient::isConnected() const {
     return state_->isConnected();
 }

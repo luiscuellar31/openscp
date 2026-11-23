@@ -627,6 +627,9 @@ class RemoteOperationController::Impl {
 
         {
             std::lock_guard lock(mutex_);
+            // An interrupt for an earlier job must not stop this one; one for
+            // this job reaches it once it is the interrupt target.
+            client_->clearInterrupt();
             interruptTarget_ = client_.get();
             activeCancel_ = job.canceled;
             activeJobId_ = job.key.id;

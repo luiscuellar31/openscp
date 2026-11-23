@@ -100,6 +100,9 @@ class ControllerFakeClient final : public openscp::RemoteClient {
         state_->wake.notify_all();
     }
 
+    // Like the curl backends, an interrupt lasts until it is cleared.
+    void clearInterrupt() override { state_->interrupted.store(false); }
+
     bool isConnected() const override { return connected_.load(); }
 
     bool list(const std::string &remotePath,
@@ -1173,6 +1176,27 @@ OPENSCP_TEST(testReplacedListingKeepsTheConnection, test) {
                "the replaced listing should report cancellation");
     test.check(opened.load() == 0 && state->interruptCalls.load() == 0,
                "a replaced listing should keep the control connection");
+}
+
+OPENSCP_TEST(testLeftoverInterruptDoesNotStopTheNextJob, test) {
+    // A cancel that reaches a job just as it ends leaves its interrupt behind;
+    // the next job must not inherit it.
+    RemoteOperationController controller;
+    const auto state = std::make_shared<FakeState>();
+    std::optional<RemoteOperationController::ListResult> result;
+    QObject::connect(&controller, &RemoteOperationController::listCompleted,
+                     &controller,
+                     [&](const RemoteOperationController::ListResult &done) {
+                         result = done;
+                     });
+    controller.installSession(makeConnectedClient(state));
+    state->interrupted.store(true);
+    state->releaseSlow.store(true);
+    controller.submit(RemoteOperationController::ListRequest{"/slow", true});
+    test.check(spinUntil([&] { return result.has_value(); }) &&
+                   result->result.outcome ==
+                       RemoteOperationController::Outcome::Succeeded,
+               "a listing after a leftover interrupt should succeed");
 }
 
 OPENSCP_TEST(testRefusedReopenIsNotRetried, test) {

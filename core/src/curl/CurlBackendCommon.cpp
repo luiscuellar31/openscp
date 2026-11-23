@@ -162,17 +162,11 @@ void CurlEasySession::reset() noexcept {
 
 CurlClientState::Operation::Operation(CurlClientState &owner)
     : owner_(&owner), lock_(owner.operationMutex_) {
-    owner_->interrupted_.store(false);
 }
 
 CurlClientState::Operation::Operation(Operation &&other) noexcept
     : owner_(std::exchange(other.owner_, nullptr)),
       lock_(std::move(other.lock_)) {
-}
-
-CurlClientState::Operation::~Operation() {
-    if (owner_)
-        owner_->interrupted_.store(false);
 }
 
 CurlClientState::ConnectedOperation::ConnectedOperation(
@@ -270,6 +264,10 @@ void CurlClientState::disconnect(SessionOptions defaultOptions) {
 
 void CurlClientState::requestInterrupt() noexcept {
     interrupted_.store(true);
+}
+
+void CurlClientState::clearInterrupt() noexcept {
+    interrupted_.store(false);
 }
 
 bool CurlClientState::isConnected() const {
