@@ -1,5 +1,9 @@
 #include "logic/common/UiAlerts.hpp"
 
+#include <QLabel>
+#include <QProgressDialog>
+#include <QStyle>
+
 namespace UiAlerts {
 namespace {
 QMessageBox::StandardButton
@@ -77,5 +81,13 @@ question(QWidget *parent, const QString &title, const QString &text,
          QMessageBox::StandardButton defaultButton) {
     return show(parent, QMessageBox::Question, title, text, buttons,
                 defaultButton);
+}
+void showLabelAsText(QProgressDialog &dialog) {
+    auto *label = new QLabel(dialog.labelText(), &dialog);
+    label->setTextFormat(Qt::PlainText);
+    // Aligned as the dialog aligns its own label: centered on Windows.
+    label->setAlignment(Qt::Alignment(dialog.style()->styleHint(
+        QStyle::SH_ProgressDialog_TextLabelAlignment, nullptr, &dialog)));
+    dialog.setLabel(label);
 }
 } // namespace UiAlerts

@@ -361,6 +361,7 @@ void PaneController::search(const SearchContext &context) {
                 .arg(context.panelLabel),
             QCoreApplication::translate("MainWindow", "Cancel"), 0, 0,
             context.dialogParent);
+        UiAlerts::showLabelAsText(*state->progress);
         state->progress->setWindowModality(Qt::NonModal);
         state->progress->setMinimumDuration(0);
         state->progress->setAutoClose(false);
@@ -479,6 +480,7 @@ void PaneController::search(const SearchContext &context) {
                                 .arg(context.panelLabel),
                             QCoreApplication::translate("MainWindow", "Cancel"),
                             0, 0, context.dialogParent);
+    UiAlerts::showLabelAsText(*state->progress);
     state->progress->setWindowModality(Qt::NonModal);
     state->progress->setMinimumDuration(0);
     state->progress->setAutoClose(false);

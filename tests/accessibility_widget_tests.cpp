@@ -38,6 +38,7 @@
 #include <QStandardItemModel>
 #include <QTableView>
 #include <QTextBrowser>
+#include <QTextDocumentFragment>
 #include <QTimer>
 #include <QToolBar>
 #include <QToolButton>
@@ -128,6 +129,35 @@ class SettingsDialogFixture final {
     QListWidget *sections = nullptr;
     QStackedWidget *pages = nullptr;
 };
+
+OPENSCP_TEST(testPathSegmentToolTipShowsFolderNamesAsText, test) {
+    // A remote folder named like markup was laid out as markup in the
+    // tooltip that offers to open it.
+    openscpui::PathNavigationBar bar(openscpui::PathFlavor::Remote,
+                                     QStringLiteral("/<b>a/reports"));
+    bar.resize(480, bar.sizeHint().height());
+    bar.show();
+    flushUiEvents();
+    auto *display = qobject_cast<QLineEdit *>(bar.keyboardFocusTarget());
+    test.check(display != nullptr, "the path bar should have its field");
+    if (!display)
+        return;
+    // A point over the folder's name, whose characters start after "/".
+    QPoint over(-1, display->height() / 2);
+    for (int x = 0; x < display->width() && over.x() < 0; ++x) {
+        if (display->cursorPositionAt(QPoint(x, over.y())) == 3)
+            over.setX(x);
+    }
+    QMouseEvent move(QEvent::MouseMove, QPointF(over),
+                     QPointF(display->mapToGlobal(over)), Qt::NoButton,
+                     Qt::NoButton, Qt::NoModifier);
+    QApplication::sendEvent(display, &move);
+    const QString shown =
+        QTextDocumentFragment::fromHtml(display->toolTip()).toPlainText();
+    test.check(over.x() >= 0 && shown == QStringLiteral("Open /<b>a"),
+               "the tooltip should show the folder's name as text: " +
+                   shown.toStdString());
+}
 
 OPENSCP_TEST(testPathFieldPreservesAppearanceAndKeyboardNavigation, test) {
     openscpui::PathNavigationBar bar(openscpui::PathFlavor::Remote,

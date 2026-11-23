@@ -30,6 +30,7 @@
 #include <QSortFilterProxyModel>
 #include <QSpinBox>
 #include <QTableView>
+#include <QTextDocument>
 #include <QTimer>
 #include <QToolButton>
 #include <QVBoxLayout>
@@ -341,14 +342,19 @@ class TransferTaskTableModel final : public QAbstractTableModel {
         }
 
         if (role == Qt::ToolTipRole) {
+            // Names and errors come from the server: a tooltip would read
+            // one such as <img width=4000 height=4000> as markup.
+            const auto asText = [](const QString &text) {
+                return Qt::convertFromPlainText(text, Qt::WhiteSpacePre);
+            };
             if (index.column() == ColSource)
-                return task.src;
+                return asText(task.src);
             if (index.column() == ColDestination)
-                return task.dst;
+                return asText(task.dst);
             if (index.column() == ColError && !task.error.isEmpty())
-                return task.error;
+                return asText(task.error);
             if (index.column() == ColName)
-                return displayNameForTask(task);
+                return asText(displayNameForTask(task));
         }
 
         if (role != Qt::DisplayRole)

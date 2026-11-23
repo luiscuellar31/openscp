@@ -16,6 +16,7 @@
 #include <QPersistentModelIndex>
 #include <QSortFilterProxyModel>
 #include <QTableView>
+#include <QTextDocumentFragment>
 
 #include <algorithm>
 #include <iostream>
@@ -164,6 +165,35 @@ OPENSCP_TEST(testQueueTableFollowsRemovedTasks, test) {
                "the table should still find the rows it added later");
     test.check(manager.taskSnapshot(later).has_value(),
                "removing by id should not touch the other task");
+}
+
+OPENSCP_TEST(testToolTipsShowPathsAsText, test) {
+    // A server could word a name such as <img width=4000 height=4000> as
+    // markup in the tooltip of its row.
+    TransferManager manager;
+    manager.setSessionIdentity(QStringLiteral("test-session"));
+    TransferBatchOptions batch;
+    batch.sessionKey = QStringLiteral("test-session");
+    const QString path = QStringLiteral("/<b>x  y.dat");
+    manager.enqueueRemoteDelete(path, false, batch);
+
+    TransferQueueDialog dialog(&manager);
+    dialog.show();
+    flushUiEvents();
+    const auto *table =
+        dialog.findChild<QTableView *>(QStringLiteral("transferQueueTable"));
+    const bool listed =
+        table && table->model() && table->model()->rowCount() == 1;
+    test.check(listed, "the table should show the queued task");
+    if (!listed)
+        return;
+    const QString tip = table->model()
+                            ->index(0, kDestinationColumn)
+                            .data(Qt::ToolTipRole)
+                            .toString();
+    test.check(QTextDocumentFragment::fromHtml(tip).toPlainText() == path,
+               "the path should show as text in its tooltip: " +
+                   tip.toStdString());
 }
 
 OPENSCP_TEST(testSelectedActionsUseTaskSnapshots, test) {

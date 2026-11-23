@@ -14,6 +14,7 @@
 #include <QPoint>
 #include <QSizePolicy>
 #include <QStyleOptionFocusRect>
+#include <QTextDocument>
 
 namespace {
 
@@ -280,7 +281,8 @@ void PathNavigationBar::updateSegmentPresentation(qsizetype segment,
     const bool current = segment + 1 == segments_.size();
     const QString action =
         current ? tr("Open directory…") : tr("Open %1").arg(part.target);
-    display_->setToolTip(action);
+    // A remote folder name could otherwise be read as markup.
+    display_->setToolTip(Qt::convertFromPlainText(action, Qt::WhiteSpacePre));
     display_->setAccessibleDescription(
         current ? tr("Current folder %1. Press Enter or Space to open path "
                      "entry.")

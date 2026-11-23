@@ -25,6 +25,7 @@
 #include <QPushButton>
 #include <QSortFilterProxyModel>
 #include <QTableView>
+#include <QTextDocument>
 #include <QThreadPool>
 #include <QTimer>
 #include <QVBoxLayout>
@@ -155,12 +156,16 @@ class SyncComparisonTableModel final : public QAbstractTableModel {
             }
         }
         if (role == Qt::ToolTipRole) {
-            return QStringLiteral("%1\n%2: %3\n%4: %5\n%6")
-                .arg(item.relativePath,
-                     QCoreApplication::translate("SyncDialog", "Source"),
-                     entryMetadataText(item.source),
-                     QCoreApplication::translate("SyncDialog", "Destination"),
-                     entryMetadataText(item.destination), item.reason);
+            // Names come from the servers: show them as text, not markup.
+            return Qt::convertFromPlainText(
+                QStringLiteral("%1\n%2: %3\n%4: %5\n%6")
+                    .arg(item.relativePath,
+                         QCoreApplication::translate("SyncDialog", "Source"),
+                         entryMetadataText(item.source),
+                         QCoreApplication::translate("SyncDialog",
+                                                     "Destination"),
+                         entryMetadataText(item.destination), item.reason),
+                Qt::WhiteSpacePre);
         }
         if (role == Qt::TextAlignmentRole && index.column() == ActionColumn) {
             return static_cast<int>(Qt::AlignCenter);
