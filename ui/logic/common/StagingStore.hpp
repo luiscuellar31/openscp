@@ -23,11 +23,14 @@ bool isStagingBatchName(const QString &name);
 QString stagingBatchPathForCleanup(const QSettings &settings,
                                    const QString &path);
 
-// Deletes `batchPath`, then its staging root if nothing else is left in it.
+// Deletes `batchPath`, then its staging root if OpenSCP created that root and
+// nothing else is left in it.
 void removeStagingBatch(const QString &batchPath);
 
 // Deletes the batches directly in `root` last modified before `cutoff`,
-// without following symbolic links. Returns how many it deleted.
+// without following symbolic links. In a root the user chose, names from
+// releases before the random suffix are left alone, as the user's own dated
+// folders can look the same. Returns how many it deleted.
 int removeStagingBatchesOlderThan(const QString &root, const QDateTime &cutoff);
 
 // The staging roots the startup cleanup goes through: the one in use and, on

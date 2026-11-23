@@ -12,6 +12,22 @@
 
 namespace openscpui {
 
+namespace {
+
+// OpenSCP creates the default root, named OpenSCP-Dragged. Any other root is a
+// folder the user chose, which may hold their own folders named by date.
+bool isOwnStagingRoot(const QString &root) {
+    return QFileInfo(root).fileName() ==
+           QFileInfo(defaultStagingRootPath()).fileName();
+}
+
+bool isOlderStagingBatchName(const QString &name) {
+    static const QRegularExpression pattern(QStringLiteral("^\\d{8}-\\d{6}$"));
+    return pattern.match(name).hasMatch();
+}
+
+} // namespace
+
 QString newStagingBatchName() {
     return QDateTime::currentDateTimeUtc().toString(
                QStringLiteral("yyyyMMdd-HHmmss-zzz")) +
@@ -34,10 +50,12 @@ QString stagingBatchPathForCleanup(const QSettings &settings,
     QString canonical = batch.canonicalFilePath();
     const QString root =
         QFileInfo(effectiveStagingRootPath(settings)).canonicalFilePath();
+    const QString name = QFileInfo(canonical).fileName();
     if (isLocalLink(batch) || canonical.isEmpty() || root.isEmpty() ||
         !QFileInfo(canonical).isDir() ||
         QFileInfo(canonical).absolutePath() != root ||
-        !isStagingBatchName(QFileInfo(canonical).fileName())) {
+        !isStagingBatchName(name) ||
+        (!isOwnStagingRoot(root) && isOlderStagingBatchName(name))) {
         return {};
     }
     return canonical;
@@ -49,7 +67,8 @@ void removeStagingBatch(const QString &batchPath) {
     (void)removeLocalEntry(batchPath);
     // QDir(root).rmdir(".") never removes the root on POSIX; its path does.
     const QString root = QFileInfo(batchPath).absolutePath();
-    if (QDir(root).isEmpty(QDir::NoDotAndDotDot | QDir::AllEntries |
+    if (isOwnStagingRoot(root) &&
+        QDir(root).isEmpty(QDir::NoDotAndDotDot | QDir::AllEntries |
                            QDir::Hidden | QDir::System)) {
         (void)QDir().rmdir(root);
     }
@@ -72,10 +91,12 @@ QStringList stagingRootsForStartupCleanup(const QSettings &settings) {
 int removeStagingBatchesOlderThan(const QString &root,
                                   const QDateTime &cutoff) {
     int removed = 0;
+    const bool ownRoot = isOwnStagingRoot(root);
     const auto entries = QDir(root).entryInfoList(
         QDir::Dirs | QDir::NoDotAndDotDot | QDir::NoSymLinks | QDir::Hidden);
     for (const QFileInfo &entry : entries) {
-        if (isLocalLink(entry) || !isStagingBatchName(entry.fileName()))
+        if (isLocalLink(entry) || !isStagingBatchName(entry.fileName()) ||
+            (!ownRoot && isOlderStagingBatchName(entry.fileName())))
             continue;
         const QDateTime modified = entry.lastModified();
         if (modified.isValid() && modified < cutoff &&

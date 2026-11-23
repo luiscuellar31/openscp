@@ -455,7 +455,7 @@ OPENSCP_TEST(testStagingBatchRemovalTakesAnEmptyRoot, test) {
     if (!directory.isValid())
         return;
     const QString root =
-        QDir(directory.path()).filePath(QStringLiteral("staging"));
+        QDir(directory.path()).filePath(QStringLiteral("OpenSCP-Dragged"));
     const QString first = QDir(root).filePath(openscpui::newStagingBatchName());
     const QString second =
         QDir(root).filePath(QStringLiteral("20260101-120000"));
@@ -471,6 +471,15 @@ OPENSCP_TEST(testStagingBatchRemovalTakesAnEmptyRoot, test) {
     openscpui::removeStagingBatch(second);
     test.check(!QFileInfo::exists(root),
                "a root left empty should be removed with its last batch");
+
+    const QString chosen =
+        QDir(directory.path()).filePath(QStringLiteral("staging"));
+    const QString batch =
+        QDir(chosen).filePath(openscpui::newStagingBatchName());
+    test.check(QDir().mkpath(batch), "the chosen root's batch should exist");
+    openscpui::removeStagingBatch(batch);
+    test.check(!QFileInfo::exists(batch) && QFileInfo::exists(chosen),
+               "a staging root the user chose should stay when left empty");
 }
 
 OPENSCP_TEST(testExpiredStagingBatchesAreRemoved, test) {
@@ -479,7 +488,7 @@ OPENSCP_TEST(testExpiredStagingBatchesAreRemoved, test) {
     if (!directory.isValid())
         return;
     const QDir base(directory.path());
-    const QString root = base.filePath(QStringLiteral("staging"));
+    const QString root = base.filePath(QStringLiteral("OpenSCP-Dragged"));
     const QString oldBatch =
         QDir(root).filePath(QStringLiteral("20200101-120000"));
     const QString newBatch =
@@ -510,6 +519,22 @@ OPENSCP_TEST(testExpiredStagingBatchesAreRemoved, test) {
                    QFileInfo::exists(newBatch) && QFileInfo::exists(other) &&
                    QFileInfo::exists(outside),
                "only batches older than the retention should be removed");
+
+    // In a folder the user chose, their own dated folders look like batches
+    // of releases before the random suffix.
+    const QString chosen = base.filePath(QStringLiteral("chosen"));
+    const QString ownFolder =
+        QDir(chosen).filePath(QStringLiteral("20200101-120000"));
+    const QString chosenBatch =
+        QDir(chosen).filePath(openscpui::newStagingBatchName());
+    test.check(QDir().mkpath(ownFolder) && QDir().mkpath(chosenBatch) &&
+                   age(ownFolder) && age(chosenBatch),
+               "the chosen root's old folders should exist");
+    test.check(openscpui::removeStagingBatchesOlderThan(
+                   chosen, QDateTime::currentDateTimeUtc().addDays(-7)) == 1 &&
+                   QFileInfo::exists(ownFolder) &&
+                   !QFileInfo::exists(chosenBatch),
+               "a chosen root should lose only batches OpenSCP named");
 }
 
 OPENSCP_TEST(testOnlyStagingBatchesAreCleanedAfterADrop, test) {
@@ -524,6 +549,8 @@ OPENSCP_TEST(testOnlyStagingBatchesAreCleanedAfterADrop, test) {
     test.check(
         QDir().mkpath(batch) && QDir().mkpath(outside) &&
             QDir().mkpath(QDir(root).filePath(QStringLiteral("Documents"))) &&
+            QDir().mkpath(
+                QDir(root).filePath(QStringLiteral("20200101-120000"))) &&
             QDir().mkpath(QDir(batch).filePath(QStringLiteral("nested"))),
         "the staging fixture should be created");
     QSettings settings(base.filePath(QStringLiteral("settings.ini")),
@@ -541,6 +568,8 @@ OPENSCP_TEST(testOnlyStagingBatchesAreCleanedAfterADrop, test) {
         QDir(batch).filePath(QStringLiteral("nested")),
         QDir(root).filePath(QStringLiteral("../20260101-120000")),
         QDir(root).filePath(QStringLiteral("20991231-235959")),
+        // A folder the user chose may hold their own dated folders.
+        QDir(root).filePath(QStringLiteral("20200101-120000")),
     };
     for (const QString &path : refused) {
         test.check(

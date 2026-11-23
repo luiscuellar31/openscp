@@ -394,9 +394,11 @@ after the drop, so its batch stays; the startup cleanup removes batches older
 than the retention setting. Unless the user chooses one, the staging root is
 `OpenSCP-Dragged` in the system's Downloads folder, which Linux can name in the
 user's language; there the startup cleanup also goes through
-`~/Downloads/OpenSCP-Dragged`, which releases before 1.3.0 used instead. Both
-deletions, and the removal of a staging root
-left empty, run outside the UI thread. The panels take only drags that carry
+`~/Downloads/OpenSCP-Dragged`, which releases before 1.3.0 used instead. A
+root the user chose is never removed, and in it only batches with the random
+suffix are deleted, since the user's own folders can be named by date like the
+batches of releases before that suffix. Both deletions, and the removal of a
+default staging root left empty, run outside the UI thread. The panels take only drags that carry
 local files; text, web links and files that exist only inside another
 application, such as e-mail attachments, are refused.
 
