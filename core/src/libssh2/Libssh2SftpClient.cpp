@@ -2354,7 +2354,15 @@ bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions &opt,
             describeJumpTunnelFailure(err)) {
             return false;
         }
+        // libssh2's reason tells a server with no algorithm in common from
+        // a connection that dropped.
+        char *reason = nullptr;
+        int reasonLength = 0;
+        (void)libssh2_session_last_error(session_, &reason, &reasonLength, 0);
         err = "SSH handshake failed";
+        if (reason && reasonLength > 0)
+            err += ": " +
+                   std::string(reason, static_cast<std::size_t>(reasonLength));
         return false;
     }
 

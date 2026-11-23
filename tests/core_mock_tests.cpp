@@ -283,6 +283,56 @@ OPENSCP_TEST(test_connection_cancel_while_peer_is_silent, t) {
     }
 }
 
+OPENSCP_TEST(test_ssh_handshake_failure_says_why, t) {
+    // "SSH handshake failed" alone read the same for a server with no
+    // algorithm in common and for one that dropped the connection.
+    const int listener = ::socket(AF_INET, SOCK_STREAM, 0);
+    sockaddr_in address{};
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    socklen_t length = sizeof(address);
+    const bool listening =
+        listener >= 0 &&
+        ::bind(listener, reinterpret_cast<sockaddr *>(&address),
+               sizeof(address)) == 0 &&
+        ::listen(listener, 1) == 0 &&
+        ::getsockname(listener, reinterpret_cast<sockaddr *>(&address),
+                      &length) == 0;
+    t.check(listening, "the fake SSH server should listen");
+    if (!listening) {
+        if (listener >= 0)
+            ::close(listener);
+        return;
+    }
+    std::thread server([listener] {
+        // A connect that fails before it reaches the server must not leave
+        // this thread waiting for it.
+        pollfd ready{listener, POLLIN, 0};
+        if (::poll(&ready, 1, 3000) <= 0)
+            return;
+        const int peer = ::accept(listener, nullptr, nullptr);
+        if (peer < 0)
+            return;
+        const std::string banner = "SSH-2.0-fake\r\n";
+        (void)::send(peer, banner.data(), banner.size(), 0);
+        ::shutdown(peer, SHUT_RDWR);
+        ::close(peer);
+    });
+    auto options = validOptions();
+    options.host = "127.0.0.1";
+    options.port = ntohs(address.sin_port);
+    options.known_hosts_policy = openscp::KnownHostsPolicy::Off;
+    openscp::Libssh2SftpClient client;
+    std::string error;
+    const bool connected = client.connect(options, error);
+    server.join();
+    ::close(listener);
+    const std::string prefix = "SSH handshake failed: ";
+    t.check(!connected && error.rfind(prefix, 0) == 0 &&
+                error.size() > prefix.size(),
+            "a failed handshake should say why: " + error);
+}
+
 OPENSCP_TEST(test_ssh_reaches_a_bracketed_ipv6_host, t) {
     // The brackets reached getaddrinfo, which on macOS and Linux finds no
     // host named "[::1]", so the connection never left the machine.
