@@ -282,6 +282,49 @@ OPENSCP_TEST(test_connection_cancel_while_peer_is_silent, t) {
                 "canceled connection creation must not return a live client");
     }
 }
+
+OPENSCP_TEST(test_ssh_reaches_a_bracketed_ipv6_host, t) {
+    // The brackets reached getaddrinfo, which on macOS and Linux finds no
+    // host named "[::1]", so the connection never left the machine.
+    const int listener = ::socket(AF_INET6, SOCK_STREAM, 0);
+    sockaddr_in6 address{};
+    address.sin6_family = AF_INET6;
+    address.sin6_addr = in6addr_loopback;
+    socklen_t length = sizeof(address);
+    const bool listening =
+        listener >= 0 &&
+        ::bind(listener, reinterpret_cast<sockaddr *>(&address),
+               sizeof(address)) == 0 &&
+        ::listen(listener, 1) == 0 &&
+        ::getsockname(listener, reinterpret_cast<sockaddr *>(&address),
+                      &length) == 0;
+    if (!listening) {
+        if (listener >= 0)
+            ::close(listener);
+        t.skip("this system has no IPv6 loopback");
+        return;
+    }
+    auto options = validOptions();
+    options.host = "[::1]";
+    options.port = ntohs(address.sin6_port);
+    options.known_hosts_policy = openscp::KnownHostsPolicy::Off;
+    std::string error;
+    auto connecting = std::async(std::launch::async, [&] {
+        openscp::Libssh2SftpClient client;
+        return client.connect(options, error);
+    });
+    pollfd ready{listener, POLLIN, 0};
+    const bool accepted = ::poll(&ready, 1, 3000) > 0;
+    const int peer = accepted ? ::accept(listener, nullptr, nullptr) : -1;
+    if (peer >= 0) {
+        ::shutdown(peer, SHUT_RDWR);
+        ::close(peer);
+    }
+    const bool connected = connecting.get();
+    ::close(listener);
+    t.check(accepted && !connected,
+            "a bracketed IPv6 host should reach its server: " + error);
+}
 #endif
 
 #ifdef _WIN32
@@ -2545,6 +2588,41 @@ OPENSCP_TEST(test_libssh2_jump_host_spawn, t) {
     t.check(!c.isConnected(), "client should remain disconnected");
 }
 
+#ifndef _WIN32
+OPENSCP_TEST(test_jump_host_in_brackets_reaches_ssh_as_an_address, t) {
+    // A stand-in for ssh, first in PATH, that writes down its arguments.
+    const fs::path arguments = makeTempFilePath("jump-arguments");
+    const fs::path standIn = arguments.parent_path() / "ssh";
+    {
+        std::ofstream script(standIn);
+        script << "#!/bin/sh\nprintf '%s\\n' \"$@\" > '" << arguments.string()
+               << "'\n";
+    }
+    std::error_code ec;
+    fs::permissions(standIn, fs::perms::owner_all, ec);
+    std::string error;
+    {
+        openscp::testsupport::ScopedEnvironment environment;
+        const char *path = std::getenv("PATH");
+        environment.set("PATH", standIn.parent_path().string() + ":" +
+                                    (path ? path : ""));
+        openscp::Libssh2SftpClient client;
+        openscp::SessionOptions options = validOptions();
+        options.host = "127.0.0.1";
+        options.jump_host = std::string("[2001:db8::1]");
+        options.jump_port = 22;
+        (void)client.connect(options, error);
+    }
+    std::string last;
+    std::ifstream written(arguments);
+    for (std::string line; std::getline(written, line);)
+        last = line;
+    fs::remove_all(arguments.parent_path(), ec);
+    t.check(last == "2001:db8::1",
+            "ssh should get the jump address without brackets, got: " + last);
+}
+#endif
+
 #ifdef _WIN32
 OPENSCP_TEST(test_windows_local_files_open_past_max_path, t) {
     // Downloads make folders and files relative to their parents, so they
@@ -2862,6 +2940,37 @@ OPENSCP_TEST(test_remove_known_hosts_entry_plain_and_hashed, t) {
     t.check(content.find("other.example ssh-ed25519") != std::string::npos,
             "unrelated known_hosts entry should be preserved");
 
+    std::error_code ec;
+    fs::remove(khPath, ec);
+    fs::remove_all(khPath.parent_path(), ec);
+}
+
+// A site may keep an IPv6 address in brackets; known_hosts names it bare on
+// port 22 and as [address]:port on others.
+OPENSCP_TEST(test_known_hosts_entries_of_a_bracketed_ipv6_site, t) {
+    const std::string key =
+        "AAAAC3NzaC1lZDI1NTE5AAAAILZlz+tnMZZGpyX4/qwU9iIfMHkUqPnwGwGZRuQQ3v1d";
+    const fs::path khPath = makeTempFilePath("openscp-knownhosts-ipv6");
+    {
+        std::ofstream out(khPath, std::ios::binary | std::ios::trunc);
+        t.check(out.is_open(), "known_hosts IPv6 fixture should be writable");
+        if (!out.is_open())
+            return;
+        out << "2001:db8::1 ssh-ed25519 " << key << "\n";
+        out << "[2001:db8::1]:2222 ssh-ed25519 " << key << "\n";
+    }
+    t.check(
+        openscp::HasKnownHostEntry(khPath.string(), "[2001:db8::1]", 22) &&
+            openscp::HasKnownHostEntry(khPath.string(), "[2001:db8::1]", 2222),
+        "a bracketed IPv6 site should find its saved keys");
+    std::string err;
+    t.checkWithError(openscp::RemoveKnownHostEntry(khPath.string(),
+                                                   "[2001:db8::1]", 2222, err),
+                     "removing the key of a bracketed IPv6 site: ", err);
+    t.check(
+        openscp::HasKnownHostEntry(khPath.string(), "2001:db8::1", 22) &&
+            !openscp::HasKnownHostEntry(khPath.string(), "2001:db8::1", 2222),
+        "only the key of that port should go");
     std::error_code ec;
     fs::remove(khPath, ec);
     fs::remove_all(khPath.parent_path(), ec);

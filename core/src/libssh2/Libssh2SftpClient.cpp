@@ -1144,9 +1144,11 @@ bool line_matches_site_host(const std::string &line,
     return false;
 }
 
-// The names known_hosts gives `host` and `port`: "host" or "[host]:port".
-std::vector<std::string> known_hosts_tokens(const std::string &host,
+// The names known_hosts gives `host` and `port`: "host" or "[host]:port". A
+// site may keep an IPv6 address in brackets, which these names never have.
+std::vector<std::string> known_hosts_tokens(const std::string &siteHost,
                                             std::uint16_t port) {
+    const std::string host = libssh2detail::withoutIpv6Brackets(siteHost);
     if (port == 22) {
         // Support this uncommon notation if present in existing files.
         return {host, "[" + host + "]:22"};
@@ -1797,9 +1799,10 @@ bool ssh_jump_command(const SessionOptions &opt, std::vector<std::string> &args,
     args.emplace_back(std::to_string(opt.jump_port));
     args.emplace_back("-W");
     args.emplace_back(format_host_port_authority(opt.host, opt.port));
-    // Whatever the destination looks like, it is not an option.
+    // Whatever the destination looks like, it is not an option. ssh would
+    // look "[2001:db8::1]" up as a name, brackets and all.
     args.emplace_back("--");
-    args.emplace_back(*opt.jump_host);
+    args.emplace_back(libssh2detail::withoutIpv6Brackets(*opt.jump_host));
     return true;
 }
 
@@ -3045,14 +3048,19 @@ bool Libssh2SftpClient::connectInternal(const SessionOptions &opt,
         setLastOperationError(RemoteErrorKind::InvalidRequest, err);
         return false;
     }
+    // A host such as [2001:db8::1] reached getaddrinfo, which finds no such
+    // name on macOS and Linux, and known_hosts as [[2001:db8::1]]:port.
+    SessionOptions endpoint = opt;
+    endpoint.host = libssh2detail::withoutIpv6Brackets(opt.host);
+    endpoint.proxy_host = libssh2detail::withoutIpv6Brackets(opt.proxy_host);
 
-    if (!tcpConnect(opt, err)) {
+    if (!tcpConnect(endpoint, err)) {
         const RemoteError failure = classifyStructuredFailure(err, false);
         disconnect();
         setLastOperationError(failure);
         return false;
     }
-    if (!sshHandshakeAuth(opt, err, initializeSftpSubsystem)) {
+    if (!sshHandshakeAuth(endpoint, err, initializeSftpSubsystem)) {
         const RemoteError structuredFailure =
             classifyStructuredFailure(err, false);
         disconnect();

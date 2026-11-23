@@ -62,6 +62,15 @@ inline bool validateEndpointHost(std::string_view host, const char *fieldLabel,
     return true;
 }
 
+// The IPv6 address inside the brackets that validateEndpointHost() allows;
+// any other host as it is. The resolver, known_hosts and SOCKS5 take the
+// address alone.
+inline std::string withoutIpv6Brackets(std::string_view host) {
+    if (host.size() >= 2 && host.front() == '[' && host.back() == ']')
+        host = host.substr(1, host.size() - 2);
+    return std::string(host);
+}
+
 inline bool
 copyKeyboardInteractivePrompts(const KeyboardInteractivePromptView *prompts,
                                int promptCount, std::vector<std::string> &out,
