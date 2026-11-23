@@ -136,6 +136,13 @@ class CurlClientState final {
     std::atomic<bool> disconnecting_{false};
 };
 
+// A libcurl string list that frees itself.
+using CurlSlist = std::unique_ptr<curl_slist, decltype(&curl_slist_free_all)>;
+
+// Appends `item` to `list`. When libcurl cannot, returns false and keeps the
+// list, which `list = curl_slist_append(list, item)` would lose.
+bool appendToCurlSlist(CurlSlist &list, const std::string &item);
+
 bool rejectInterrupted(const std::atomic<bool> *interrupted, std::string &err,
                        CURLcode *curlCodeOut = nullptr);
 

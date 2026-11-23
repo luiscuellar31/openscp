@@ -285,6 +285,15 @@ CurlClientState::snapshot(const Operation &operation) const {
     return {options_, session_.get(), commandRoot_};
 }
 
+bool appendToCurlSlist(CurlSlist &list, const std::string &item) {
+    curl_slist *head = curl_slist_append(list.get(), item.c_str());
+    if (!head)
+        return false;
+    (void)list.release();
+    list.reset(head);
+    return true;
+}
+
 bool rejectInterrupted(const std::atomic<bool> *interrupted, std::string &err,
                        CURLcode *curlCodeOut) {
     if (!interrupted || !interrupted->load())

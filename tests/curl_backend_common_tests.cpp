@@ -235,6 +235,22 @@ OPENSCP_TEST(testClientsRejectAuthorityInjection, test) {
 #endif
 }
 
+OPENSCP_TEST(testCurlSlistKeepsEveryItemInOrder, test) {
+    // `list = curl_slist_append(list, item)` loses the list when libcurl
+    // cannot add an item; appendToCurlSlist() keeps it. That failure needs
+    // libcurl's allocator to fail, which this test cannot arrange.
+    openscp::curlcommon::CurlSlist list(nullptr, &curl_slist_free_all);
+    const bool appended =
+        openscp::curlcommon::appendToCurlSlist(list, "Depth: 1") &&
+        openscp::curlcommon::appendToCurlSlist(list, "Translate: f");
+    std::vector<std::string> items;
+    for (const curl_slist *item = list.get(); item; item = item->next)
+        items.emplace_back(item->data);
+    test.check(appended && items == std::vector<std::string>{"Depth: 1",
+                                                             "Translate: f"},
+               "a curl list should keep every item in order");
+}
+
 OPENSCP_TEST(testFtpCommandRoot, test) {
     using openscp::curlcommon::encodeFtpUrlPath;
     using openscp::curlcommon::ftpCommandPath;

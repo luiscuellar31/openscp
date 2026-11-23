@@ -348,10 +348,12 @@ bool runFtpCommands(CURL *curl, const SessionOptions &opt,
         return false;
     }
 
-    struct curl_slist *quote = nullptr;
-    for (const std::string &command : commands)
-        quote = curl_slist_append(quote, command.c_str());
-    if (!quote) {
+    curlcommon::CurlSlist quote(nullptr, &curl_slist_free_all);
+    const bool listed = std::all_of(
+        commands.begin(), commands.end(), [&quote](const std::string &command) {
+            return curlcommon::appendToCurlSlist(quote, command);
+        });
+    if (!listed || !quote) {
         err = "Could not allocate FTP command list.";
         return false;
     }
@@ -365,7 +367,7 @@ bool runFtpCommands(CURL *curl, const SessionOptions &opt,
     const bool configured =
         curl_easy_setopt(curl, CURLOPT_URL, url.c_str()) == CURLE_OK &&
         curl_easy_setopt(curl, CURLOPT_NOBODY, 1L) == CURLE_OK &&
-        curl_easy_setopt(curl, CURLOPT_QUOTE, quote) == CURLE_OK &&
+        curl_easy_setopt(curl, CURLOPT_QUOTE, quote.get()) == CURLE_OK &&
         curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION,
                          curlcommon::appendStringCallback) == CURLE_OK &&
         curl_easy_setopt(curl, CURLOPT_WRITEDATA, &responseSink) == CURLE_OK &&
@@ -381,18 +383,15 @@ bool runFtpCommands(CURL *curl, const SessionOptions &opt,
           curl_easy_setopt(curl, CURLOPT_VERBOSE, 1L) == CURLE_OK));
     if (!configured) {
         err = "Could not configure FTP command request.";
-        curl_slist_free_all(quote);
         return false;
     }
     if (curlcommon::rejectInterrupted(interrupted, err, &curlCodeOut)) {
-        curl_slist_free_all(quote);
         return false;
     }
 
     std::string detail;
     curlCodeOut = curlcommon::performWithErrorDetail(curl, detail);
     (void)curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &responseCodeOut);
-    curl_slist_free_all(quote);
     if (curlcommon::refusedResponse(responseSink, "FTP command response",
                                     curlCodeOut, err)) {
         return false;
@@ -907,8 +906,8 @@ bool CurlFtpClient::connect(const SessionOptions &opt, std::string &err) {
     const std::string url = buildFtpUrl(normalized, "/");
     // Authenticate and obtain the login directory without opening a data
     // connection or downloading a potentially huge root listing.
-    struct curl_slist *probeCommands = curl_slist_append(nullptr, "PWD");
-    if (!probeCommands) {
+    curlcommon::CurlSlist probeCommands(nullptr, &curl_slist_free_all);
+    if (!curlcommon::appendToCurlSlist(probeCommands, "PWD")) {
         err = "Could not allocate FTP connection probe command.";
         setLastOperationError(RemoteErrorKind::LocalIo, err);
         return false;
@@ -920,21 +919,20 @@ bool CurlFtpClient::connect(const SessionOptions &opt, std::string &err) {
         false};
     if (curl_easy_setopt(curl, CURLOPT_URL, url.c_str()) != CURLE_OK ||
         curl_easy_setopt(curl, CURLOPT_NOBODY, 1L) != CURLE_OK ||
-        curl_easy_setopt(curl, CURLOPT_QUOTE, probeCommands) != CURLE_OK ||
+        curl_easy_setopt(curl, CURLOPT_QUOTE, probeCommands.get()) !=
+            CURLE_OK ||
         curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L) != CURLE_OK ||
         curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION,
                          curlcommon::transferProgressCallback) != CURLE_OK ||
         curl_easy_setopt(curl, CURLOPT_XFERINFODATA, &cancelContext) !=
             CURLE_OK) {
         err = "Could not configure FTP connection probe.";
-        curl_slist_free_all(probeCommands);
         setLastOperationError(RemoteErrorKind::LocalIo, err);
         return false;
     }
 
     CURLcode rc = CURLE_OK;
     if (curlcommon::rejectInterrupted(operation.interrupted(), err, &rc)) {
-        curl_slist_free_all(probeCommands);
         setLastOperationError(RemoteErrorKind::Canceled, err,
                               static_cast<std::int64_t>(rc));
         return false;
@@ -943,7 +941,6 @@ bool CurlFtpClient::connect(const SessionOptions &opt, std::string &err) {
     rc = curlcommon::performWithErrorDetail(curl, detail);
     long responseCode = 0;
     (void)curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &responseCode);
-    curl_slist_free_all(probeCommands);
     if (operation.interrupted()->load() ||
         opt.connection_stop_token.stop_requested()) {
         err = "Interrupted";
