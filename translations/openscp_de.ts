@@ -175,72 +175,71 @@ Verwenden Sie ein offizielles Paket, um vollständige Lizenzinformationen zu erh
         <translation>Uploads verwenden eine temporäre Datei auf dem Server und werden über SFTP atomar umbenannt.</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="183"/>
         <source>Classic SCP writes directly to the final remote path. A canceled or failed upload may leave a partial destination.</source>
-        <translation>Klassisches SCP schreibt direkt in den endgültigen Remote-Pfad. Bei einem abgebrochenen oder fehlgeschlagenen Upload kann eine unvollständige Zieldatei zurückbleiben.</translation>
+        <translation type="vanished">Klassisches SCP schreibt direkt in den endgültigen Remote-Pfad. Bei einem abgebrochenen oder fehlgeschlagenen Upload kann eine unvollständige Zieldatei zurückbleiben.</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="220"/>
+        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="221"/>
         <source>Remember the last local and remote paths</source>
         <translation>Letzte lokale und Remote-Pfade merken</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="237"/>
+        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="238"/>
         <source>Use SSH jump host (bastion)</source>
         <translation>SSH-Sprungserver (Bastion) verwenden</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="246"/>
+        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="247"/>
         <source>My server</source>
         <translation>Mein Server</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="248"/>
+        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="249"/>
         <source>Home/current directory when empty</source>
         <translation>Home-Verzeichnis oder aktuelles Verzeichnis bei leerer Eingabe</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="249"/>
-        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="272"/>
-        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="341"/>
-        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="440"/>
-        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="468"/>
-        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="493"/>
+        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="250"/>
+        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="273"/>
+        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="342"/>
+        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="441"/>
+        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="469"/>
+        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="494"/>
         <source>Choose…</source>
         <translation>Auswählen…</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="254"/>
+        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="255"/>
         <source>Server port for the selected protocol</source>
         <translation>Serverport für das ausgewählte Protokoll</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="255"/>
+        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="256"/>
         <source>user</source>
         <translation>benutzer</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="256"/>
-        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="258"/>
-        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="264"/>
+        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="257"/>
+        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="259"/>
         <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="265"/>
-        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="270"/>
+        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="266"/>
         <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="271"/>
+        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="272"/>
         <source>optional</source>
         <translation>optional</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="257"/>
+        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="258"/>
         <source>~/.ssh/id_ed25519</source>
         <translation>~/.ssh/id_ed25519</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="259"/>
+        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="260"/>
         <source>proxy.example.com</source>
         <translation>proxy.example.com</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="266"/>
+        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="267"/>
         <source>bastion.example.com</source>
         <translation>bastion.example.com</translation>
     </message>
@@ -249,59 +248,59 @@ Verwenden Sie ein offizielles Paket, um vollständige Lizenzinformationen zu erh
         <translation type="vanished">SSH-Sprungserver sind unter Windows derzeit nicht verfügbar.</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="297"/>
-        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="303"/>
-        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="307"/>
-        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="313"/>
-        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="317"/>
-        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="323"/>
+        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="298"/>
+        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="304"/>
+        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="308"/>
+        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="314"/>
+        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="318"/>
+        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="324"/>
         <source>Show</source>
         <translation>Anzeigen</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="303"/>
-        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="313"/>
-        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="323"/>
+        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="304"/>
+        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="314"/>
+        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="324"/>
         <source>Hide</source>
         <translation>Ausblenden</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="359"/>
+        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="360"/>
         <source>Direct (no proxy)</source>
         <translation>Direkt (ohne Proxy)</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="361"/>
+        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="362"/>
         <source>SOCKS5</source>
         <translation>SOCKS5</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="363"/>
+        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="364"/>
         <source>HTTP CONNECT</source>
         <translation>HTTP CONNECT</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="403"/>
+        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="404"/>
         <source>Save to saved sites</source>
         <translation>Als Verbindung speichern</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="405"/>
+        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="406"/>
         <source>Save passwords/passphrases</source>
         <translation>Passwörter/Passphrasen speichern</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="420"/>
+        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="421"/>
         <source>~/.ssh/known_hosts</source>
         <translation>~/.ssh/known_hosts</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="423"/>
+        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="424"/>
         <source>Strict</source>
         <translation>Streng</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="425"/>
+        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="426"/>
         <source>Accept new (TOFU)</source>
         <translation>Neue akzeptieren (TOFU)</translation>
     </message>
@@ -310,344 +309,349 @@ Verwenden Sie ein offizielles Paket, um vollständige Lizenzinformationen zu erh
         <translation type="vanished">Keine Überprüfung (doppelte Bestätigung, läuft nach 15 Minuten ab)</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="428"/>
+        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="183"/>
+        <source>Classic SCP writes directly to the final remote path and replaces a file of the same name without asking. A canceled or failed upload may leave a partial destination.</source>
+        <translation>Klassisches SCP schreibt direkt in den endgültigen Remote-Pfad und ersetzt eine gleichnamige Datei ohne Nachfrage. Bei einem abgebrochenen oder fehlgeschlagenen Upload kann eine unvollständige Zieldatei zurückbleiben.</translation>
+    </message>
+    <message>
+        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="429"/>
         <source>No verification (double confirmation, expires in %1 min)</source>
         <translation>Keine Überprüfung (doppelte Bestätigung, läuft nach %1 Min. ab)</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="445"/>
+        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="446"/>
         <source>Optional (recommended)</source>
         <translation>Optional (empfohlen)</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="448"/>
+        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="449"/>
         <source>Required (strict)</source>
         <translation>Erforderlich (streng)</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="451"/>
+        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="452"/>
         <source>Off (not recommended)</source>
         <translation>Aus (nicht empfohlen)</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="454"/>
+        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="455"/>
         <source>Checksum verification for resume and final transfer validation.</source>
         <translation>Prüfsummenprüfung beim Fortsetzen und zur abschließenden Überprüfung der Übertragung.</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="456"/>
+        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="457"/>
         <source>Automatic (based on port)</source>
         <translation>Automatisch (anhand des Ports)</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="458"/>
+        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="459"/>
         <source>Explicit TLS (AUTH TLS)</source>
         <translation>Explizites TLS (AUTH TLS)</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="460"/>
+        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="461"/>
         <source>Implicit TLS</source>
         <translation>Implizites TLS</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="463"/>
+        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="464"/>
         <source>Verify FTPS server certificate (recommended)</source>
         <translation>FTPS-Serverzertifikat überprüfen (empfohlen)</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="465"/>
-        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="490"/>
+        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="466"/>
+        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="491"/>
         <source>System CA bundle</source>
         <translation>Systemweites CA-Paket</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="477"/>
+        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="478"/>
         <source>HTTPS (recommended)</source>
         <translation>HTTPS (empfohlen)</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="479"/>
+        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="480"/>
         <source>HTTP (insecure)</source>
         <translation>HTTP (unsicher)</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="486"/>
+        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="487"/>
         <source>Remote paths are confined below this WebDAV collection.</source>
         <translation>Remote-Pfade sind auf den Bereich unterhalb dieser WebDAV-Sammlung beschränkt.</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="488"/>
+        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="489"/>
         <source>Verify WebDAV server certificate (recommended)</source>
         <translation>WebDAV-Serverzertifikat überprüfen (empfohlen)</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="560"/>
+        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="561"/>
         <source>Startup folders</source>
         <translation>Startordner</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="562"/>
+        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="563"/>
         <source>SSH key</source>
         <translation>SSH-Schlüssel</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="564"/>
+        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="565"/>
         <source>Proxy and jump host</source>
         <translation>Proxy und Sprungserver</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="567"/>
+        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="568"/>
         <source>Security</source>
         <translation>Sicherheit</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="582"/>
+        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="583"/>
         <source>Site name:</source>
         <translation>Verbindungsname:</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="586"/>
+        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="587"/>
         <source>Protocol:</source>
         <translation>Protokoll:</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="587"/>
+        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="588"/>
         <source>SCP mode:</source>
         <translation>SCP-Modus:</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="588"/>
+        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="589"/>
         <source>FTPS mode:</source>
         <translation>FTPS-Modus:</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="589"/>
+        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="590"/>
         <source>WebDAV scheme:</source>
         <translation>WebDAV-Schema:</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="590"/>
+        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="591"/>
         <source>WebDAV base path:</source>
         <translation>WebDAV-Basispfad:</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="591"/>
+        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="592"/>
         <source>Host / Port:</source>
         <translation>Host / Port:</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="592"/>
+        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="593"/>
         <source>User:</source>
         <translation>Benutzer:</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="593"/>
+        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="594"/>
         <source>Password:</source>
         <translation>Passwort:</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="596"/>
+        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="597"/>
         <source>Initial local path:</source>
         <translation>Lokaler Startpfad:</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="597"/>
+        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="598"/>
         <source>Initial remote path:</source>
         <translation>Remote-Startpfad:</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="601"/>
+        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="602"/>
         <source>Private key path:</source>
         <translation>Pfad zum privaten Schlüssel:</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="602"/>
+        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="603"/>
         <source>Key passphrase:</source>
         <translation>Schlüssel-Passphrase:</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="605"/>
+        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="606"/>
         <source>Proxy:</source>
         <translation>Proxy:</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="606"/>
+        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="607"/>
         <source>Proxy host / port:</source>
         <translation>Proxy-Host / Port:</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="607"/>
+        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="608"/>
         <source>Proxy user:</source>
         <translation>Proxy-Benutzer:</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="608"/>
+        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="609"/>
         <source>Proxy password:</source>
         <translation>Proxy-Passwort:</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="610"/>
+        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="611"/>
         <source>Jump host / port:</source>
         <translation>Sprungserver / Port:</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="611"/>
+        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="612"/>
         <source>Jump user:</source>
         <translation>Sprungserver-Benutzer:</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="612"/>
+        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="613"/>
         <source>Jump private key:</source>
         <translation>Privater Sprungserver-Schlüssel:</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="615"/>
+        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="616"/>
         <source>Known hosts file:</source>
         <translation>known_hosts-Datei:</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="616"/>
+        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="617"/>
         <source>Policy:</source>
         <translation>Richtlinie:</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="617"/>
+        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="618"/>
         <source>Integrity:</source>
         <translation>Integrität:</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="619"/>
+        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="620"/>
         <source>FTPS CA bundle:</source>
         <translation>FTPS-CA-Paket:</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="621"/>
+        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="622"/>
         <source>WebDAV CA bundle:</source>
         <translation>WebDAV-CA-Paket:</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="831"/>
+        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="832"/>
         <source>Select known_hosts</source>
         <translation>known_hosts auswählen</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="838"/>
+        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="839"/>
         <source>Select FTPS CA bundle</source>
         <translation>FTPS-CA-Paket auswählen</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="844"/>
+        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="845"/>
         <source>Select WebDAV CA bundle</source>
         <translation>WebDAV-CA-Paket auswählen</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="851"/>
+        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="852"/>
         <source>Select private key</source>
         <translation>Privaten Schlüssel auswählen</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="858"/>
+        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="859"/>
         <source>Select jump private key</source>
         <translation>Privaten Sprungserver-Schlüssel auswählen</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="867"/>
+        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="868"/>
         <source>Select initial local path</source>
         <translation>Anfänglichen lokalen Pfad auswählen</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="902"/>
+        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="903"/>
         <source>Remember last folders</source>
         <translation>Letzte Ordner merken</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="903"/>
+        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="904"/>
         <source>Custom folders</source>
         <translation>Benutzerdefinierte Ordner</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="904"/>
+        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="905"/>
         <source>Default folders</source>
         <translation>Standardordner</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="910"/>
+        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="911"/>
         <source>Not configured</source>
         <translation>Nicht konfiguriert</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="911"/>
+        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="912"/>
         <source>Configured</source>
         <translation>Konfiguriert</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="915"/>
+        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="916"/>
         <source>Direct connection</source>
         <translation>Direktverbindung</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="917"/>
+        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="918"/>
         <source>SSH jump host</source>
         <translation>SSH-Sprungserver</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="938"/>
+        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="939"/>
         <source>Accept new hosts</source>
         <translation>Neue Hosts akzeptieren</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="940"/>
+        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="941"/>
         <source>No host verification</source>
         <translation>Keine Host-Überprüfung</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="944"/>
-        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="952"/>
+        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="945"/>
+        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="953"/>
         <source>Certificate verification off</source>
         <translation>Zertifikatsprüfung aus</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="960"/>
+        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="961"/>
         <source>Integrity required</source>
         <translation>Integrität erforderlich</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="963"/>
+        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="964"/>
         <source>Integrity off</source>
         <translation>Integritätsprüfung aus</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="967"/>
+        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="968"/>
         <source>Default security</source>
         <translation>Standardsicherheit</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="1494"/>
+        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="1495"/>
         <source>sftp.example.com</source>
         <translation>sftp.example.com</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="1497"/>
+        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="1498"/>
         <source>scp.example.com</source>
         <translation>scp.example.com</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="1500"/>
+        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="1501"/>
         <source>ftp.example.com</source>
         <translation>ftp.example.com</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="1503"/>
+        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="1504"/>
         <source>ftps.example.com</source>
         <translation>ftps.example.com</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="1506"/>
+        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="1507"/>
         <source>webdav.example.com</source>
         <translation>webdav.example.com</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="1584"/>
+        <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="1585"/>
         <source>Not available for the selected protocol.</source>
         <translation>Für das ausgewählte Protokoll nicht verfügbar.</translation>
     </message>
@@ -4082,7 +4086,7 @@ Aktualisiert: %2  |  Fehlgeschlagen: %3</translation>
     </message>
     <message>
         <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1266"/>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1344"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1345"/>
         <source> min</source>
         <translation> Min.</translation>
     </message>
@@ -4113,7 +4117,7 @@ Aktualisiert: %2  |  Fehlgeschlagen: %3</translation>
     </message>
     <message>
         <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1284"/>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1357"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1358"/>
         <source>FTPS</source>
         <translation>FTPS</translation>
     </message>
@@ -4143,37 +4147,36 @@ Aktualisiert: %2  |  Fehlgeschlagen: %3</translation>
         <translation>Uploads verwenden eine temporäre Datei auf dem Server und werden über SFTP atomar umbenannt.</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1302"/>
         <source>Classic SCP writes directly to the final remote path. A canceled or failed upload may leave a partial destination.</source>
-        <translation>Klassisches SCP schreibt direkt in den endgültigen Remote-Pfad. Bei einem abgebrochenen oder fehlgeschlagenen Upload kann eine unvollständige Zieldatei zurückbleiben.</translation>
+        <translation type="vanished">Klassisches SCP schreibt direkt in den endgültigen Remote-Pfad. Bei einem abgebrochenen oder fehlgeschlagenen Upload kann eine unvollständige Zieldatei zurückbleiben.</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1305"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1306"/>
         <source>Default SCP mode:</source>
         <translation>Standardmäßiger SCP-Modus:</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1310"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1311"/>
         <source>When deleting a site, also remove its stored credentials.</source>
         <translation>Beim Löschen einer Verbindung auch die gespeicherten Anmeldedaten entfernen.</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1314"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1315"/>
         <source>Security</source>
         <translation>Sicherheit</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1316"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1317"/>
         <source>Connection policies</source>
         <translation>Verbindungsrichtlinien</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1321"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1322"/>
         <source>Strict</source>
         <translation>Streng</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1322"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1323"/>
         <source>Accept new (TOFU)</source>
         <translation>Neue akzeptieren (TOFU)</translation>
     </message>
@@ -4182,47 +4185,47 @@ Aktualisiert: %2  |  Fehlgeschlagen: %3</translation>
         <translation type="vanished">Keine Überprüfung (doppelte Bestätigung, läuft nach 15 Minuten ab)</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1327"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1328"/>
         <source>Default known_hosts policy:</source>
         <translation>Standardrichtlinie für known_hosts:</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1333"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1334"/>
         <source>Optional (recommended)</source>
         <translation>Optional (empfohlen)</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1335"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1336"/>
         <source>Required (strict)</source>
         <translation>Erforderlich (streng)</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1337"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1338"/>
         <source>Off (not recommended)</source>
         <translation>Aus (nicht empfohlen)</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1339"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1340"/>
         <source>Default integrity policy:</source>
         <translation>Standardrichtlinie für Integrität:</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1342"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1343"/>
         <source>No-verification TTL:</source>
         <translation>Gültigkeitsdauer ohne Überprüfung:</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1345"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1346"/>
         <source>Duration of the temporary exception for no host-key verification policy.</source>
         <translation>Dauer der temporären Ausnahme von der Richtlinie zur Überprüfung des Hostschlüssels.</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1365"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1366"/>
         <source>Verify FTPS server certificate by default (recommended).</source>
         <translation>FTPS-Serverzertifikat standardmäßig überprüfen (empfohlen).</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1358"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1359"/>
         <source>Default FTPS CA bundle:</source>
         <translation>Standardmäßiges FTPS-CA-Paket:</translation>
     </message>
@@ -4232,187 +4235,192 @@ Aktualisiert: %2  |  Fehlgeschlagen: %3</translation>
         <translation>Keine Überprüfung (doppelte Bestätigung, läuft nach %1 Min. ab)</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1359"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1302"/>
+        <source>Classic SCP writes directly to the final remote path and replaces a file of the same name without asking. A canceled or failed upload may leave a partial destination.</source>
+        <translation>Klassisches SCP schreibt direkt in den endgültigen Remote-Pfad und ersetzt eine gleichnamige Datei ohne Nachfrage. Bei einem abgebrochenen oder fehlgeschlagenen Upload kann eine unvollständige Zieldatei zurückbleiben.</translation>
+    </message>
+    <message>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1360"/>
         <source>Select FTPS CA bundle</source>
         <translation>FTPS-CA-Paket auswählen</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1361"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1362"/>
         <source>System CA bundle</source>
         <translation>Systemweites CA-Paket</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1367"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1368"/>
         <source>Credentials and terminal</source>
         <translation>Anmeldedaten und Terminal</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1371"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1372"/>
         <source>Hash hostnames in known_hosts (recommended).</source>
         <translation>Hostnamen in known_hosts als Hash speichern (empfohlen).</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1372"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1373"/>
         <source>Show fingerprint in HEX (colon) format (visual only).</source>
         <translation>Fingerabdruck im HEX-Format mit Doppelpunkten anzeigen (nur Darstellung).</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1374"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1375"/>
         <source>Force interactive login when using Open in terminal (disable key/agent auth).</source>
         <translation>Bei „Im Terminal öffnen“ interaktive Anmeldung erzwingen (Schlüssel-/Agent-Authentifizierung deaktivieren).</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1377"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1378"/>
         <source>Enable automatic SFTP CLI fallback when using Open in terminal.</source>
         <translation>Bei „Im Terminal öffnen“ automatischen Rückgriff auf die SFTP-CLI aktivieren.</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1383"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1384"/>
         <source>Use stricter Keychain accessibility (this device only).</source>
         <translation>Strengere Keychain-Zugriffskontrolle verwenden (nur dieses Gerät).</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1391"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1392"/>
         <source>Allow insecure credentials fallback (not recommended).</source>
         <translation>Unsicheren Rückgriff für Anmeldedaten zulassen (nicht empfohlen).</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1396"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1397"/>
         <source>Network</source>
         <translation>Netzwerk</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1397"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1398"/>
         <source>Session health</source>
         <translation>Sitzungszustand</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1399"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1400"/>
         <source>Session health check interval:</source>
         <translation>Intervall der Sitzungszustandsprüfung:</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1400"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1401"/>
         <source> s</source>
         <translation> s</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1404"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1405"/>
         <source>Staging and drag-out</source>
         <translation>Zwischenspeicherung und Herausziehen</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1405"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1406"/>
         <source>Folder and cleanup</source>
         <translation>Ordner und Bereinigung</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1407"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1408"/>
         <source>Staging folder:</source>
         <translation>Zwischenspeicherordner:</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1408"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1409"/>
         <source>Select staging folder</source>
         <translation>Zwischenspeicherordner auswählen</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1410"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1411"/>
         <source>Restore default staging folder</source>
         <translation>Standardmäßigen Zwischenspeicherordner wiederherstellen</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1420"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1421"/>
         <source>Auto-clean staging after successful drag-out (recommended).</source>
         <translation>Zwischenspeicher nach erfolgreichem Herausziehen automatisch bereinigen (empfohlen).</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1422"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1423"/>
         <source>Startup cleanup retention:</source>
         <translation>Aufbewahrungsdauer bei Startbereinigung:</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1423"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1424"/>
         <source> days</source>
         <translation> Tage</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1424"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1425"/>
         <source>Safety limits</source>
         <translation>Sicherheitslimits</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1426"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1427"/>
         <source>Preparation timeout:</source>
         <translation>Zeitlimit der Vorbereitung:</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1427"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1428"/>
         <source> ms</source>
         <translation> ms</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1427"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1428"/>
         <source>Time before showing the Wait/Cancel dialog.</source>
         <translation>Zeit bis zum Anzeigen des Dialogs Warten/Abbrechen.</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1429"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1430"/>
         <source>Confirm from items:</source>
         <translation>Bestätigen ab Elementanzahl:</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1432"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1433"/>
         <source>Item count threshold to request confirmation for large batches.</source>
         <translation>Elementanzahl, ab der bei großen Stapeln eine Bestätigung angefordert wird.</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1434"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1435"/>
         <source>Confirm from size:</source>
         <translation>Bestätigen ab Größe:</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1435"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1436"/>
         <source> MiB</source>
         <translation> MiB</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1437"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1438"/>
         <source>Estimated size threshold to request confirmation for large batches.</source>
         <translation>Geschätzte Größe, ab der bei großen Stapeln eine Bestätigung angefordert wird.</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1447"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1448"/>
         <source>Limit for recursive folder drag-out to avoid deep trees and loops.</source>
         <translation>Limit für das rekursive Herausziehen von Ordnern, um tiefe Verzeichnisbäume und Schleifen zu vermeiden.</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1449"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1450"/>
         <source>Recommended: 32</source>
         <translation>Empfohlen: 32</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1453"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1454"/>
         <source>Maximum depth:</source>
         <translation>Maximale Tiefe:</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1476"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1477"/>
         <source>Close</source>
         <translation>Schließen</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1477"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1478"/>
         <source>Apply</source>
         <translation>Anwenden</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1569"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1570"/>
         <source>Enable insecure fallback</source>
         <translation>Unsicheren Rückgriff aktivieren</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1570"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1571"/>
         <source>This stores credentials unencrypted on disk using QSettings.
 On Linux, it is recommended to install and use libsecret/Secret Service for better security.
 
@@ -4423,17 +4431,17 @@ Unter Linux wird empfohlen, für höhere Sicherheit libsecret/Secret Service zu 
 Möchten Sie den unsicheren Rückgriff trotzdem aktivieren?</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1591"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1592"/>
         <source>Settings</source>
         <translation>Einstellungen</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1663"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1664"/>
         <source>Language</source>
         <translation>Sprache</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1664"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1665"/>
         <source>Language changes take effect after restart.</source>
         <translation>Sprachänderungen werden nach dem Neustart wirksam.</translation>
     </message>

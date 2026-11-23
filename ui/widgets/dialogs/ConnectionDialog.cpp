@@ -180,8 +180,9 @@ ConnectionDialog::ConnectionDialog(QWidget *parent) : QDialog(parent) {
         Qt::ToolTipRole);
     scpMode_->setItemData(
         1,
-        tr("Classic SCP writes directly to the final remote path. A canceled "
-           "or failed upload may leave a partial destination."),
+        tr("Classic SCP writes directly to the final remote path and "
+           "replaces a file of the same name without asking. A canceled or "
+           "failed upload may leave a partial destination."),
         Qt::ToolTipRole);
     {
         openscpui::AppSettings settings;

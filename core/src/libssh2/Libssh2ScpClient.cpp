@@ -564,18 +564,28 @@ bool Libssh2ScpClient::put(
 
 bool Libssh2ScpClient::exists(const std::string &remote_path, bool &isDir,
                               std::string &err) {
-    auto structuredErrorScope = beginStructuredOperation(err);
-    (void)remote_path;
+    // The queue looks for a free name this way when an upload is renamed.
     isDir = false;
-    return unsupportedScpOperation("path existence checks", err);
+    FileInfo info;
+    if (!stat(remote_path, info, err))
+        return false;
+    isDir = info.is_dir;
+    return true;
 }
 
 bool Libssh2ScpClient::stat(const std::string &remote_path, FileInfo &info,
                             std::string &err) {
+    auto ioLock = delegate_.lockIo();
     auto structuredErrorScope = beginStructuredOperation(err);
-    (void)remote_path;
     info = FileInfo{};
-    return unsupportedScpOperation("metadata stat", err);
+    if (!sftpFallbackEnabled())
+        return unsupportedScpOperation("metadata stat", err);
+    if (!delegate_.ensureSftpSubsystem(err))
+        return false;
+    const bool found = delegate_.stat(remote_path, info, err);
+    if (!found && !err.empty())
+        setLastOperationError(delegate_.lastOperationError());
+    return found;
 }
 
 bool Libssh2ScpClient::chmod(const std::string &remote_path, std::uint32_t mode,

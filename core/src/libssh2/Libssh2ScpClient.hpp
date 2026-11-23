@@ -12,7 +12,13 @@ class Libssh2ScpClient : public RemoteClient {
 
     Protocol protocol() const override { return Protocol::Scp; }
     ProtocolCapabilities capabilities() const override {
-        return capabilitiesForProtocol(Protocol::Scp);
+        ProtocolCapabilities capabilities =
+            capabilitiesForProtocol(Protocol::Scp);
+        // Auto mode uploads through SFTP, which can also describe the
+        // destination, so the queue can ask before replacing it.
+        capabilities.can_stat = capabilities.can_read_metadata =
+            transferMode_ == ScpTransferMode::Auto;
+        return capabilities;
     }
 
     bool connect(const SessionOptions &opt, std::string &err) override;

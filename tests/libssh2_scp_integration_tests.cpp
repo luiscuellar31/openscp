@@ -121,6 +121,30 @@ int main() {
         "SCP upload should succeed: ", err);
     t.check(uploadProgressCalled, "upload progress callback should be called");
 
+    // Auto mode uploads through SFTP, so the queue can see what an upload
+    // would replace and ask first.
+    t.check(caps.can_stat && caps.can_read_metadata,
+            "Auto-mode SCP should describe remote files");
+    openscp::FileInfo uploadedInfo{};
+    err.clear();
+    t.checkWithError(client.stat(remotePath, uploadedInfo, err) &&
+                         uploadedInfo.size == payload.size(),
+                     "Auto-mode SCP should stat the uploaded file: ", err);
+    err.clear();
+    t.check(!client.stat(remotePath + ".missing", uploadedInfo, err) &&
+                err.empty(),
+            "Auto-mode SCP should report a missing file without an error");
+    // "Rename" in the conflict prompt looks for a free name with exists().
+    bool isDirectory = true;
+    err.clear();
+    t.checkWithError(client.exists(remotePath, isDirectory, err) &&
+                         !isDirectory,
+                     "Auto-mode SCP should find the uploaded file: ", err);
+    err.clear();
+    t.check(!client.exists(remotePath + ".missing", isDirectory, err) &&
+                err.empty(),
+            "Auto-mode SCP should take a missing name as free");
+
     // Waiting for the channel to close instead of acknowledging SCP's final
     // status byte stalls each download until the session timeout.
     constexpr auto kTimeoutStall = std::chrono::seconds(10);
@@ -150,6 +174,8 @@ int main() {
     err.clear();
     t.checkWithError(scpOnlyClient.connect(scpOnlyOptions, err),
                      "SCP-only connect should succeed: ", err);
+    t.check(!scpOnlyClient.capabilities().can_stat,
+            "SCP-only mode should not offer stat");
     const fs::path scpOnlyDownload = tempDir / "scp_only_download.txt";
     for (int attempt = 0; attempt < 2; ++attempt) {
         err.clear();
