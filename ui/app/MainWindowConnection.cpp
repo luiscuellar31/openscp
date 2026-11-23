@@ -95,6 +95,15 @@ normalizedIdentityScpMode(const openscp::SessionOptions &opt) {
     return opt.scp_transfer_mode;
 }
 
+// setModel() keeps the previous selection model alive and listening to its
+// model; no other view shares the right panel's.
+void setPanelModel(QAbstractItemView *view, QAbstractItemModel *model) {
+    QItemSelectionModel *previous = view->selectionModel();
+    view->setModel(model);
+    if (previous && previous != view->selectionModel())
+        previous->deleteLater();
+}
+
 QString protocolDisplayLabel(openscp::Protocol protocol) {
     return QString::fromLatin1(openscp::protocolDisplayName(protocol));
 }
@@ -407,7 +416,7 @@ void MainWindow::applyDisconnectLocalUiState() {
     // Switch UI immediately to local/local so the app remains usable while
     // transfer workers unwind in the background.
     if (rightRemoteModel_) {
-        rightView_->setModel(rightLocalModel_);
+        setPanelModel(rightView_, rightLocalModel_);
         if (rightView_->selectionModel()) {
             connect(rightView_->selectionModel(),
                     &QItemSelectionModel::selectionChanged, this,
@@ -1463,7 +1472,7 @@ void MainWindow::maybePersistQuickConnectSite(
 void MainWindow::applyRemoteConnectedUI(const openscp::SessionOptions &opt) {
     saveRightHeaderState(rightIsRemote_);
     if (rightRemoteModel_) {
-        rightView_->setModel(rightLocalModel_);
+        setPanelModel(rightView_, rightLocalModel_);
         delete rightRemoteModel_;
         rightRemoteModel_ = nullptr;
     }
@@ -1535,7 +1544,7 @@ void MainWindow::applyRemoteConnectedUI(const openscp::SessionOptions &opt) {
                     }
                 });
         activateScpTransferModeUi(false);
-        rightView_->setModel(rightRemoteModel_);
+        setPanelModel(rightView_, rightRemoteModel_);
         if (rightView_->selectionModel()) {
             connect(rightView_->selectionModel(),
                     &QItemSelectionModel::selectionChanged, this,
@@ -1575,7 +1584,7 @@ void MainWindow::applyRemoteConnectedUI(const openscp::SessionOptions &opt) {
         return;
     }
 
-    rightView_->setModel(rightLocalModel_);
+    setPanelModel(rightView_, rightLocalModel_);
     rightPath_->setPath(QStringLiteral("/"));
     rightIsRemote_ = true;
     sessionController_->setOptions(opt);
