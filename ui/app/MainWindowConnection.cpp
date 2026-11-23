@@ -393,6 +393,7 @@ void MainWindow::applyDisconnectLocalUiState() {
         if (activeRemoteListJob_ != 0)
             remoteOps_->cancel(activeRemoteListJob_);
         activeRemoteListJob_ = 0;
+        remoteRefreshPending_ = false;
         remoteOps_->clearSession();
     }
     if (syncCoordinator_)

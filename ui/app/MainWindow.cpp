@@ -1080,6 +1080,7 @@ void MainWindow::initializeRuntimeState() {
             activeRemoteListJob_ = 0;
             if (result.result.outcome !=
                 RemoteOperationController::Outcome::Succeeded) {
+                remoteRefreshPending_ = false;
                 if (activeRemoteListIsInitial_ &&
                     !initialRemoteFallbackAttempted_ &&
                     requestedRemotePath_ != QStringLiteral("/")) {
@@ -1104,6 +1105,21 @@ void MainWindow::initializeRuntimeState() {
             entries.reserve(static_cast<std::size_t>(result.entries.size()));
             for (const auto &entry : result.entries)
                 entries.push_back(entry.info);
+            // The view stayed usable during a refresh, so keep the selection
+            // and scroll position it has now.
+            QSet<QString> selectedNames;
+            int scrollValue = 0;
+            if (activeRemoteListIsRefresh_ && rightView_->selectionModel()) {
+                const QModelIndexList selected =
+                    rightView_->selectionModel()->selectedRows(kNameColumn);
+                for (const QModelIndex &index : selected) {
+                    const QString name = rightRemoteModel_->nameAt(index);
+                    if (!name.isEmpty())
+                        selectedNames.insert(name);
+                }
+                if (rightView_->verticalScrollBar())
+                    scrollValue = rightView_->verticalScrollBar()->value();
+            }
             rightRemoteModel_->setEntries(result.path, entries);
             openscpui::enableRestoringFocus(
                 rightView_, std::exchange(remoteViewHadFocus_, false));
@@ -1116,7 +1132,7 @@ void MainWindow::initializeRuntimeState() {
                 QVector<int> restoredRows;
                 for (int row = 0; row < rightRemoteModel_->rowCount(); ++row) {
                     const QModelIndex index = rightRemoteModel_->index(row, 0);
-                    if (!remoteRefreshSelectionNames_.contains(
+                    if (!selectedNames.contains(
                             rightRemoteModel_->nameAt(index))) {
                         continue;
                     }
@@ -1135,17 +1151,17 @@ void MainWindow::initializeRuntimeState() {
                     selection->setCurrentIndex(first,
                                                QItemSelectionModel::NoUpdate);
                 if (rightView_->verticalScrollBar()) {
-                    rightView_->verticalScrollBar()->setValue(
-                        remoteRefreshScrollValue_);
+                    rightView_->verticalScrollBar()->setValue(scrollValue);
                 }
             } else if (rightView_->selectionModel()) {
                 rightView_->selectionModel()->clear();
                 if (rightView_->verticalScrollBar())
                     rightView_->verticalScrollBar()->setValue(0);
             }
-            remoteRefreshSelectionNames_.clear();
             activeRemoteListIsRefresh_ = false;
             activeRemoteListIsInitial_ = false;
+            if (std::exchange(remoteRefreshPending_, false))
+                requestRemoteListing(requestedRemotePath_, true);
         });
     connect(remoteOps_, &RemoteOperationController::healthCheckCompleted, this,
             [this](const RemoteOperationController::HealthResult &result) {

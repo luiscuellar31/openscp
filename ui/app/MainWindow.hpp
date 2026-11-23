@@ -410,11 +410,11 @@ class MainWindow : public QMainWindow {
     std::atomic<bool> remoteScanInProgress_{false};
     QTimer *uploadRefreshTimer_ = nullptr;
     quint64 activeRemoteListJob_ = 0;
+    // A refresh asked for while its folder was being listed, to run after it.
+    bool remoteRefreshPending_ = false;
     // The remote view had the keyboard focus when a listing disabled it.
     bool remoteViewHadFocus_ = false;
     QString requestedRemotePath_;
-    QSet<QString> remoteRefreshSelectionNames_;
-    int remoteRefreshScrollValue_ = 0;
     bool activeRemoteListIsRefresh_ = false;
     bool activeRemoteListIsInitial_ = false;
     bool initialRemoteFallbackAttempted_ = false;

@@ -179,41 +179,38 @@ void MainWindow::requestRemoteListing(const QString &path, bool refresh,
     }
 
     const QString normalized = normalizeRemotePath(path);
+    // A refresh of the folder being listed waits for that listing: replacing
+    // it would discard its result, and uploads that keep finishing would keep
+    // every listing from showing.
+    if (refresh && activeRemoteListJob_ != 0 &&
+        requestedRemotePath_ == normalized) {
+        remoteRefreshPending_ = true;
+        return;
+    }
+    remoteRefreshPending_ = false;
     // The new listing replaces the old one; interrupting it would drop the
     // control connection and make the next listing log in again.
     if (activeRemoteListJob_ != 0)
         remoteOps_->cancel(activeRemoteListJob_,
                            RemoteOperationController::Interrupt::No);
 
-    remoteRefreshSelectionNames_.clear();
-    remoteRefreshScrollValue_ = 0;
-    if (refresh && rightView_->selectionModel()) {
-        const QModelIndexList selected =
-            rightView_->selectionModel()->selectedRows(kNameColumn);
-        for (const QModelIndex &index : selected) {
-            const QString name = rightRemoteModel_->nameAt(index);
-            if (!name.isEmpty())
-                remoteRefreshSelectionNames_.insert(name);
-        }
-        if (rightView_->verticalScrollBar()) {
-            remoteRefreshScrollValue_ =
-                rightView_->verticalScrollBar()->value();
-        }
-    }
-
     requestedRemotePath_ = normalized;
     activeRemoteListIsRefresh_ = refresh;
     activeRemoteListIsInitial_ = initialLoad;
     if (initialLoad && normalized != QStringLiteral("/"))
         initialRemoteFallbackAttempted_ = false;
-    if (!refresh)
-        rightRemoteModel_->setLoading(normalized);
     rightPath_->setPath(normalized);
     refreshRightPathNavigation();
-    // Disabling the focused view would pass the focus to "Disconnect", where
-    // the next Enter disconnects; the view gets it back after the listing.
-    remoteViewHadFocus_ = openscpui::disableWithoutPassingFocus(rightView_) ||
-                          remoteViewHadFocus_;
+    // A refresh keeps the current entries usable until the new ones arrive.
+    if (!refresh) {
+        rightRemoteModel_->setLoading(normalized);
+        // Disabling the focused view would pass the focus to "Disconnect",
+        // where the next Enter disconnects; the view gets it back after the
+        // listing.
+        remoteViewHadFocus_ =
+            openscpui::disableWithoutPassingFocus(rightView_) ||
+            remoteViewHadFocus_;
+    }
     statusBar()->showMessage(refresh ? tr("Refreshing remote folder…")
                                      : tr("Opening remote folder…"),
                              0);
