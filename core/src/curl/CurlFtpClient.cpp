@@ -339,6 +339,14 @@ bool runFtpCommands(CURL *curl, const SessionOptions &opt,
     curl_easy_reset(curl);
     if (!configureCommonCurlHandle(curl, opt, err))
         return false;
+    // The commands carry absolute paths, so they run where the connection
+    // already is: with an absolute URL path, libcurl sends no CWD and keeps
+    // its record of the current folder, which the next transfer then reuses.
+    if (curl_easy_setopt(curl, CURLOPT_FTP_FILEMETHOD,
+                         static_cast<long>(CURLFTPMETHOD_NOCWD)) != CURLE_OK) {
+        err = "Could not configure FTP directory changes.";
+        return false;
+    }
 
     struct curl_slist *quote = nullptr;
     for (const std::string &command : commands)
@@ -352,7 +360,8 @@ bool runFtpCommands(CURL *curl, const SessionOptions &opt,
     curlcommon::BoundedStringSink responseSink{&sink};
     curlcommon::TransferProgressContext cancelContext{
         {}, {}, interrupted, false};
-    const std::string url = buildFtpUrl(opt, "/");
+    // "%2F/" is absolute and ends in a slash, so it never names a file.
+    const std::string url = buildFtpUrl(opt, "/") + "%2F/";
     const bool configured =
         curl_easy_setopt(curl, CURLOPT_URL, url.c_str()) == CURLE_OK &&
         curl_easy_setopt(curl, CURLOPT_NOBODY, 1L) == CURLE_OK &&
@@ -1134,14 +1143,11 @@ bool CurlFtpClient::put(const std::string &local, const std::string &remote,
                                                        configurationError) &&
                        curl_easy_setopt(handle, CURLOPT_URL, url.c_str()) ==
                            CURLE_OK &&
+                       // The queue creates missing folders before the upload.
+                       // One CWD reaches the folder, so this recreates only
+                       // its last level if that went away since.
                        curl_easy_setopt(handle, CURLOPT_FTP_CREATE_MISSING_DIRS,
-                                        CURLFTP_CREATE_DIR_RETRY) == CURLE_OK &&
-                       // A single CWD would create only the last missing
-                       // directory level.
-                       curl_easy_setopt(
-                           handle, CURLOPT_FTP_FILEMETHOD,
-                           static_cast<long>(CURLFTPMETHOD_MULTICWD)) ==
-                           CURLE_OK;
+                                        CURLFTP_CREATE_DIR_RETRY) == CURLE_OK;
             },
             [](CURLcode code, long responseCode, const std::string &message) {
                 return ftpErrorFromResult(code, responseCode, message);

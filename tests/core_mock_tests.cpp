@@ -1795,6 +1795,140 @@ OPENSCP_TEST(test_curlftp_listing_skips_list_after_a_data_failure, t) {
     ::close(listener);
     server.join();
 }
+
+OPENSCP_TEST(test_curlftp_uploads_to_one_folder_without_changing_folder, t) {
+    // Each upload used to walk from the root one folder at a time, and its
+    // rename went back to the root: 6 CWD per file four levels deep.
+    const int listener = ::socket(AF_INET, SOCK_STREAM, 0);
+    sockaddr_in address{};
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    socklen_t length = sizeof(address);
+    const bool listening =
+        listener >= 0 &&
+        ::bind(listener, reinterpret_cast<sockaddr *>(&address),
+               sizeof(address)) == 0 &&
+        ::listen(listener, 4) == 0 &&
+        ::getsockname(listener, reinterpret_cast<sockaddr *>(&address),
+                      &length) == 0;
+    t.check(listening, "the fake FTP server should listen");
+    if (!listening) {
+        if (listener >= 0)
+            ::close(listener);
+        return;
+    }
+    std::atomic<int> cwdCommands{0};
+    std::thread server([listener, &cwdCommands] {
+        for (;;) {
+            const int client = ::accept(listener, nullptr, nullptr);
+            if (client < 0)
+                return;
+            const auto reply = [client](const std::string &line) {
+                const std::string text = line + "\r\n";
+                (void)::send(client, text.data(), text.size(), 0);
+            };
+            reply("220 fake");
+            int data = -1;
+            std::string pending;
+            char buffer[512];
+            for (;;) {
+                const std::size_t end = pending.find("\r\n");
+                if (end == std::string::npos) {
+                    const ssize_t n = ::recv(client, buffer, sizeof(buffer), 0);
+                    if (n <= 0)
+                        break;
+                    pending.append(buffer, static_cast<std::size_t>(n));
+                    continue;
+                }
+                const std::string command = pending.substr(0, end);
+                pending.erase(0, end + 2);
+                const std::string verb = command.substr(0, command.find(' '));
+                if (verb == "USER") {
+                    reply("331 password");
+                } else if (verb == "PASS") {
+                    reply("230 logged in");
+                } else if (verb == "PWD") {
+                    reply("257 \"/\" is the current directory");
+                } else if (verb == "CWD") {
+                    ++cwdCommands;
+                    reply("250 ok");
+                } else if (verb == "TYPE") {
+                    reply("200 ok");
+                } else if (verb == "EPSV") {
+                    sockaddr_in dataAddress{};
+                    dataAddress.sin_family = AF_INET;
+                    dataAddress.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+                    socklen_t dataLength = sizeof(dataAddress);
+                    data = ::socket(AF_INET, SOCK_STREAM, 0);
+                    (void)::bind(data,
+                                 reinterpret_cast<sockaddr *>(&dataAddress),
+                                 sizeof(dataAddress));
+                    (void)::listen(data, 1);
+                    (void)::getsockname(
+                        data, reinterpret_cast<sockaddr *>(&dataAddress),
+                        &dataLength);
+                    reply("229 Entering Extended Passive Mode (|||" +
+                          std::to_string(ntohs(dataAddress.sin_port)) + "|)");
+                } else if (verb == "STOR") {
+                    reply("150 ok");
+                    const int stream = ::accept(data, nullptr, nullptr);
+                    while (stream >= 0 &&
+                           ::recv(stream, buffer, sizeof(buffer), 0) > 0) {
+                    }
+                    if (stream >= 0)
+                        ::close(stream);
+                    ::close(data);
+                    data = -1;
+                    reply("226 stored");
+                } else if (verb == "RNFR") {
+                    reply("350 ready");
+                } else if (verb == "RNTO") {
+                    reply("250 renamed");
+                } else if (verb == "QUIT") {
+                    reply("221 bye");
+                    break;
+                } else {
+                    reply("502 not implemented");
+                }
+            }
+            if (data >= 0)
+                ::close(data);
+            ::close(client);
+        }
+    });
+
+    const fs::path local =
+        fs::temp_directory_path() / "openscp_ftp_one_folder_upload.txt";
+    {
+        std::ofstream out(local);
+        out << "payload\n";
+    }
+    openscp::CurlFtpClient client(openscp::Protocol::Ftp);
+    openscp::SessionOptions opt;
+    opt.protocol = openscp::Protocol::Ftp;
+    opt.host = "127.0.0.1";
+    opt.port = ntohs(address.sin_port);
+    opt.username = "alice";
+    opt.password = openscp::SecureString("secret");
+    std::string err;
+    const bool first =
+        client.connect(opt, err) &&
+        client.put(local.string(), "/a/b/c/d/first.txt", err, {}, {}, false);
+    t.check(first, "the first upload should succeed: " + err);
+    const int before = cwdCommands.load();
+    const bool second =
+        first &&
+        client.put(local.string(), "/a/b/c/d/second.txt", err, {}, {}, false);
+    t.check(second && cwdCommands.load() == before,
+            "a second upload to the same folder should change no folder: " +
+                std::to_string(cwdCommands.load() - before) + " CWD, " + err);
+    client.disconnect();
+    ::shutdown(listener, SHUT_RDWR);
+    ::close(listener);
+    server.join();
+    std::error_code removeError;
+    fs::remove(local, removeError);
+}
 #endif
 
 OPENSCP_TEST(test_curlftp_rejects_command_injection_paths, t) {
