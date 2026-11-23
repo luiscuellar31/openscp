@@ -316,7 +316,7 @@ jobs:
 
   sanitizers:
     name: ${{ matrix.name }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 35
     strategy:
       fail-fast: false
@@ -325,9 +325,14 @@ jobs:
           - name: ASan + UBSan
             id: asan-ubsan
             flags: address,undefined
+            runner: ubuntu-latest
+          # On Ubuntu 26.04, with Qt 6.10, TSan reports leaks of Qt's own
+          # threads in the GUI tests and fails one of its own checks when Qt
+          # starts a thread; on 24.04 those tests pass.
           - name: TSan
             id: tsan
             flags: thread
+            runner: ubuntu-24.04
 
     steps:
       - name: Checkout
