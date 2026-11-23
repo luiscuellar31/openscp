@@ -924,9 +924,11 @@ TlsTestServerIdentity makeTlsTestServerIdentity() {
                                                             &EVP_PKEY_free);
     std::unique_ptr<X509, decltype(&X509_free)> certificate(X509_new(),
                                                             &X509_free);
-    if (!certificate)
+    // OpenSSL 4 returns the certificate's own name as const, so build a copy.
+    std::unique_ptr<X509_NAME, decltype(&X509_NAME_free)> name(X509_NAME_new(),
+                                                               &X509_NAME_free);
+    if (!certificate || !name)
         return identity;
-    X509_NAME *name = X509_get_subject_name(certificate.get());
     const auto *commonName = reinterpret_cast<const unsigned char *>("test");
     std::unique_ptr<BIO, decltype(&BIO_free)> pem(BIO_new(BIO_s_mem()),
                                                   &BIO_free);
@@ -934,9 +936,10 @@ TlsTestServerIdentity makeTlsTestServerIdentity() {
         ASN1_INTEGER_set(X509_get_serialNumber(certificate.get()), 1) != 1 ||
         !X509_gmtime_adj(X509_getm_notBefore(certificate.get()), 0) ||
         !X509_gmtime_adj(X509_getm_notAfter(certificate.get()), 3600) ||
-        X509_NAME_add_entry_by_txt(name, "CN", MBSTRING_ASC, commonName, -1, -1,
-                                   0) != 1 ||
-        X509_set_issuer_name(certificate.get(), name) != 1 ||
+        X509_NAME_add_entry_by_txt(name.get(), "CN", MBSTRING_ASC, commonName,
+                                   -1, -1, 0) != 1 ||
+        X509_set_subject_name(certificate.get(), name.get()) != 1 ||
+        X509_set_issuer_name(certificate.get(), name.get()) != 1 ||
         X509_set_pubkey(certificate.get(), key.get()) != 1 ||
         X509_sign(certificate.get(), key.get(), EVP_sha256()) <= 0 || !pem ||
         PEM_write_bio_X509(pem.get(), certificate.get()) != 1)
