@@ -439,7 +439,8 @@ Synchronization has three steps:
 1. `SyncCoordinator` collects bounded local and remote snapshots.
 2. `SyncComparisonEngine` creates a data-only plan.
 3. The accepted actions enter `TransferManager` as one ordered batch, in one
-   `enqueueTasks` call.
+   `enqueueTasks` call, for the session that was compared: when the
+   connection closed while the dialog was open, nothing is queued.
 
 When the scans pass 100,000 items or 100 GiB of known data, the coordinator
 pauses both, the remote traversal through `RemoteOperationController::setPaused`

@@ -30,6 +30,9 @@ class RemoteModel; // fwd
 class RemoteOperationController;
 class LocalTreeDiscovery;
 class SyncCoordinator;
+class SyncDialog;
+struct SyncPreparationResult;
+struct SyncSnapshotEntry;
 namespace openscpui {
 class FocusTraversalController;
 class PaneController;
@@ -143,6 +146,11 @@ class MainWindow : public QMainWindow {
     openscpui::MacUpdater *macUpdater_ = nullptr;
     void initializeSyncCoordinator();
     QProgressDialog *makeComparisonProgress(const QString &label);
+    void onSyncPreparationReady(const SyncPreparationResult &prepared);
+    void connectChecksumFlow(SyncDialog &dialog, const QString &localRoot,
+                             const QString &remoteRoot,
+                             QVector<SyncSnapshotEntry> &localSnapshot,
+                             QVector<SyncSnapshotEntry> &remoteSnapshot);
     bool isScpTransferMode() const;
     void activateScpTransferModeUi(bool enabled);
     void showOpenPathDialog(bool rightPane);

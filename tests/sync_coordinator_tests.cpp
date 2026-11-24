@@ -132,6 +132,29 @@ class SpecialEntryMockClient final : public openscp::MockSftpClient {
     }
 };
 
+OPENSCP_TEST(testChecksumsReachEntriesCheckedOnBothSides, test) {
+    SyncChecksumResult result;
+    result.localChecksums.insert(QStringLiteral("both.txt"), "local-sum");
+    result.remoteChecksums.insert(QStringLiteral("both.txt"), "remote-sum");
+    result.localChecksums.insert(QStringLiteral("local-only.txt"), "alone");
+    QVector<SyncSnapshotEntry> local(2);
+    local[0].relativePath = QStringLiteral("both.txt");
+    local[1].relativePath = QStringLiteral("local-only.txt");
+    QVector<SyncSnapshotEntry> remote(1);
+    remote[0].relativePath = QStringLiteral("both.txt");
+
+    SyncCoordinator::applyChecksums(result, local, remote);
+    test.check(local[0].checksum == "local-sum" &&
+                   remote[0].checksum == "remote-sum" &&
+                   local[0].checksumAlgorithm == result.algorithm &&
+                   remote[0].checksumAlgorithm == result.algorithm,
+               "an entry checked on both sides should get its own side's "
+               "checksum");
+    test.check(local[1].checksum.isEmpty() &&
+                   local[1].checksumAlgorithm.isEmpty(),
+               "an entry with nothing to compare against should get none");
+}
+
 OPENSCP_TEST(testCoordinatorIsDestroyedAfterItsControllers, test) {
     // MainWindow creates the remote controller first, and Qt destroys
     // children in creation order, so the coordinator outlives it.

@@ -981,6 +981,29 @@ void SyncCoordinator::maybeFinish(
     emit preparationReady(state->result);
 }
 
+void SyncCoordinator::applyChecksums(
+    const SyncChecksumResult &result, QVector<SyncSnapshotEntry> &localSnapshot,
+    QVector<SyncSnapshotEntry> &remoteSnapshot) {
+    const auto apply = [&result](QVector<SyncSnapshotEntry> &snapshot,
+                                 bool local) {
+        for (SyncSnapshotEntry &entry : snapshot) {
+            const auto localChecksum =
+                result.localChecksums.constFind(entry.relativePath);
+            const auto remoteChecksum =
+                result.remoteChecksums.constFind(entry.relativePath);
+            if (localChecksum == result.localChecksums.cend() ||
+                remoteChecksum == result.remoteChecksums.cend()) {
+                continue;
+            }
+            entry.checksumAlgorithm = result.algorithm;
+            entry.checksum =
+                local ? localChecksum.value() : remoteChecksum.value();
+        }
+    };
+    apply(localSnapshot, true);
+    apply(remoteSnapshot, false);
+}
+
 quint64 SyncCoordinator::enqueuePlan(const SyncExecutionPlan &plan,
                                      const QString &localRoot,
                                      const QString &remoteRoot,
