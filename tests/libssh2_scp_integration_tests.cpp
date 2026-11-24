@@ -23,6 +23,7 @@ using openscp::testsupport::joinRemotePath;
 using openscp::testsupport::kSkipExitCode;
 using openscp::testsupport::parsePort;
 using openscp::testsupport::readFile;
+using openscp::testsupport::removeRemoteTree;
 using openscp::testsupport::uniqueToken;
 using openscp::testsupport::writeFile;
 
@@ -98,6 +99,17 @@ int main() {
             "SCP should not support resume");
 
     const std::string token = uniqueToken();
+    // SCP cannot delete, so the run keeps its files in a folder of its own
+    // that SFTP removes at the end.
+    const std::string runDir =
+        joinRemotePath(remoteBase, "openscp_scp_it_" + token);
+    openscp::SessionOptions sftpOptions = opt;
+    sftpOptions.protocol = openscp::Protocol::Sftp;
+    openscp::Libssh2SftpClient sftp;
+    err.clear();
+    t.checkWithError(
+        sftp.connect(sftpOptions, err) && sftp.mkdir(runDir, err, 0755),
+        "the run's remote folder should be created over SFTP: ", err);
     const fs::path tempDir =
         fs::temp_directory_path() / ("openscp_scp_" + token);
     const fs::path localUpload = tempDir / "upload.txt";
@@ -108,8 +120,7 @@ int main() {
         "openscp scp integration payload " + token + "\nline two\n";
     t.check(writeFile(localUpload, payload), "should write local upload file");
 
-    const std::string remotePath =
-        joinRemotePath(remoteBase, "openscp_scp_it_" + token + ".txt");
+    const std::string remotePath = joinRemotePath(runDir, "upload.txt");
 
     bool uploadProgressCalled = false;
     err.clear();
@@ -197,7 +208,7 @@ int main() {
     // The upload waits for the remote scp to confirm the write, which is
     // where it reports a full disk.
     const std::string scpOnlyRemotePath =
-        joinRemotePath(remoteBase, "openscp_scp_only_it_" + token + ".txt");
+        joinRemotePath(runDir, "scp-only-upload.txt");
     err.clear();
     t.checkWithError(scpOnlyClient.put(localUpload.string(), scpOnlyRemotePath,
                                        err, {}, {}, false),
@@ -215,8 +226,7 @@ int main() {
     // SCP creates the file with the local permissions too; SFTP reads them.
     {
         const fs::path localPrivate = tempDir / "private.txt";
-        const std::string remotePrivate =
-            joinRemotePath(remoteBase, "openscp_scp_private_" + token + ".txt");
+        const std::string remotePrivate = joinRemotePath(runDir, "private.txt");
         std::error_code permissionsError;
         const bool written = writeFile(localPrivate, "private");
         fs::permissions(localPrivate,
@@ -289,9 +299,7 @@ int main() {
         const bool uploaded =
             ready &&
             interrupted.put(
-                largeUpload.string(),
-                joinRemotePath(remoteBase,
-                               "openscp_scp_it_interrupted_" + token + ".bin"),
+                largeUpload.string(), joinRemotePath(runDir, "interrupted.bin"),
                 interruptErr,
                 [&](std::size_t done, std::size_t) {
                     if (done > 0 && !interruptRequested) {
@@ -306,6 +314,8 @@ int main() {
     }
 
     client.disconnect();
+    removeRemoteTree(sftp, runDir);
+    sftp.disconnect();
     std::error_code ec;
     fs::remove_all(tempDir, ec);
     return openscp::testsupport::finishIntegration(

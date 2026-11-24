@@ -140,6 +140,30 @@ class IntegrationTempDir final {
     bool valid_ = false;
 };
 
+// Removes `directory` and everything in it, as far as `client` can, and
+// reports nothing: it only keeps a failed run from leaving files on a server
+// that keeps them between runs. Links are removed, never followed.
+inline void removeRemoteTree(openscp::RemoteClient &client,
+                             const std::string &directory) {
+    std::vector<openscp::FileInfo> entries;
+    std::string error;
+    if (client.list(directory, entries, error)) {
+        for (const openscp::FileInfo &entry : entries) {
+            if (entry.name == "." || entry.name == "..")
+                continue;
+            const std::string path = joinRemotePath(directory, entry.name);
+            const bool link = (entry.mode & 0170000u) == 0120000u;
+            error.clear();
+            if (entry.is_dir && !link)
+                removeRemoteTree(client, path);
+            else
+                (void)client.removeFile(path, error);
+        }
+    }
+    error.clear();
+    (void)client.removeDir(directory, error);
+}
+
 struct ManagedFilesContractHooks {
     std::function<void(openscp::RemoteClient &, const std::string &,
                        TestContext &)>
@@ -366,6 +390,8 @@ inline void runManagedFilesContract(
     error.clear();
     checkOperation(client.removeDir(remoteDir, error),
                    "directory deletion should succeed", error);
+    // What a failed step left there.
+    removeRemoteTree(client, remoteDir);
     client.disconnect();
 }
 
