@@ -5,7 +5,6 @@
 #include <cctype>
 #include <cerrno>
 #include <cstdlib>
-#include <ctime>
 #include <limits>
 #include <sstream>
 #include <string_view>
@@ -54,7 +53,23 @@ std::uint32_t parseUnixPermBits(const std::string &permissions) {
     return mode;
 }
 
-bool parseMlsdUtcTimestamp(const std::string &raw, std::uint64_t &outEpoch) {
+// Days from 1970-01-01 to a date of the proleptic Gregorian calendar, after
+// Howard Hinnant's days_from_civil, for years from 1970. timegm took most of
+// the time of a large listing, microseconds per entry on macOS. As with
+// timegm, a day past the end of its month counts on into the next one.
+std::uint64_t daysSinceEpoch(std::uint64_t year, std::uint64_t month,
+                             std::uint64_t day) {
+    year -= month <= 2 ? 1 : 0;
+    const std::uint64_t era = year / 400;
+    const std::uint64_t yearOfEra = year - era * 400;
+    const std::uint64_t dayOfYear =
+        (153 * (month > 2 ? month - 3 : month + 9) + 2) / 5 + day - 1;
+    const std::uint64_t dayOfEra =
+        yearOfEra * 365 + yearOfEra / 4 - yearOfEra / 100 + dayOfYear;
+    return era * 146097 + dayOfEra - 719468;
+}
+
+bool parseMlsdUtcTimestamp(std::string_view raw, std::uint64_t &outEpoch) {
     if (raw.size() < 14)
         return false;
     std::uint64_t year = 0;
@@ -63,99 +78,114 @@ bool parseMlsdUtcTimestamp(const std::string &raw, std::uint64_t &outEpoch) {
     std::uint64_t hour = 0;
     std::uint64_t minute = 0;
     std::uint64_t second = 0;
-    if (!parseUnsignedDec(std::string_view(raw).substr(0, 4), year) ||
-        !parseUnsignedDec(std::string_view(raw).substr(4, 2), month) ||
-        !parseUnsignedDec(std::string_view(raw).substr(6, 2), day) ||
-        !parseUnsignedDec(std::string_view(raw).substr(8, 2), hour) ||
-        !parseUnsignedDec(std::string_view(raw).substr(10, 2), minute) ||
-        !parseUnsignedDec(std::string_view(raw).substr(12, 2), second)) {
+    if (!parseUnsignedDec(raw.substr(0, 4), year) ||
+        !parseUnsignedDec(raw.substr(4, 2), month) ||
+        !parseUnsignedDec(raw.substr(6, 2), day) ||
+        !parseUnsignedDec(raw.substr(8, 2), hour) ||
+        !parseUnsignedDec(raw.substr(10, 2), minute) ||
+        !parseUnsignedDec(raw.substr(12, 2), second)) {
         return false;
     }
     if (month < 1 || month > 12 || day < 1 || day > 31 || hour > 23 ||
         minute > 59 || second > 60 || year < 1970 || year > 9999) {
         return false;
     }
-    std::tm timestamp{};
-    timestamp.tm_year = static_cast<int>(year - 1900);
-    timestamp.tm_mon = static_cast<int>(month - 1);
-    timestamp.tm_mday = static_cast<int>(day);
-    timestamp.tm_hour = static_cast<int>(hour);
-    timestamp.tm_min = static_cast<int>(minute);
-    timestamp.tm_sec = static_cast<int>(second);
-    timestamp.tm_isdst = 0;
-#ifdef _WIN32
-    const std::time_t converted = _mkgmtime(&timestamp);
-#else
-    const std::time_t converted = timegm(&timestamp);
-#endif
-    if (converted < 0)
-        return false;
-    outEpoch = static_cast<std::uint64_t>(converted);
+    outEpoch = daysSinceEpoch(year, month, day) * 86400 + hour * 3600 +
+               minute * 60 + second;
     return true;
 }
 
+bool isAsciiWhitespace(char character) {
+    return std::isspace(static_cast<unsigned char>(character)) != 0;
+}
+
+std::string_view trimAsciiView(std::string_view value) {
+    while (!value.empty() && isAsciiWhitespace(value.front()))
+        value.remove_prefix(1);
+    while (!value.empty() && isAsciiWhitespace(value.back()))
+        value.remove_suffix(1);
+    return value;
+}
+
+// Fact names ignore case (RFC 3659); `lowercase` is the name to match.
+bool isFact(std::string_view name, std::string_view lowercase) {
+    return name.size() == lowercase.size() &&
+           std::equal(name.begin(), name.end(), lowercase.begin(),
+                      [](char character, char expected) {
+                          return std::tolower(static_cast<unsigned char>(
+                                     character)) == expected;
+                      });
+}
+
 // Splits an MLSD or MLST entry line ("fact=value;... name") and reads its
-// facts. The lowercased type fact is left for the caller to interpret.
-bool parseMlsxEntry(const std::string &raw, FileInfo &parsed,
+// facts. The lowercased type fact is left for the caller to interpret. A
+// listing can hold many thousands of entries, so the line is read in place:
+// only the name and the type are copied.
+bool parseMlsxEntry(std::string_view line, FileInfo &parsed,
                     std::string &type) {
-    std::string line = raw;
     if (!line.empty() && line.back() == '\r')
-        line.pop_back();
+        line.remove_suffix(1);
     // RFC 3659 puts one space between the facts and the pathname, which can
     // itself start or end with spaces, so only padding before the facts goes.
-    line = trimAsciiLeft(line);
+    while (!line.empty() && isAsciiWhitespace(line.front()))
+        line.remove_prefix(1);
 
     const std::size_t separator = line.find_first_of(" \t");
-    if (separator == std::string::npos)
+    if (separator == std::string_view::npos)
         return false;
 
-    const std::string factsPart = line.substr(0, separator);
-    parsed = FileInfo{};
-    parsed.name = line.substr(separator + 1);
-    if (trimAscii(parsed.name).empty())
+    const std::string_view factsPart = line.substr(0, separator);
+    const std::string_view name = line.substr(separator + 1);
+    if (trimAsciiView(name).empty())
         return false;
+    parsed = FileInfo{};
+    parsed.name.assign(name.data(), name.size());
     type.clear();
 
     std::size_t start = 0;
     while (start < factsPart.size()) {
         const std::size_t end = factsPart.find(';', start);
-        const std::string fact = end == std::string::npos
-                                     ? factsPart.substr(start)
-                                     : factsPart.substr(start, end - start);
-        start = end == std::string::npos ? factsPart.size() : end + 1;
+        const std::string_view fact =
+            end == std::string_view::npos
+                ? factsPart.substr(start)
+                : factsPart.substr(start, end - start);
+        start = end == std::string_view::npos ? factsPart.size() : end + 1;
         if (fact.empty())
             continue;
         const std::size_t equals = fact.find('=');
-        if (equals == std::string::npos)
+        if (equals == std::string_view::npos)
             continue;
-        const std::string key = toLowerAscii(fact.substr(0, equals));
-        const std::string value = fact.substr(equals + 1);
-        if (key == "type") {
-            type = toLowerAscii(value);
-        } else if (key == "size") {
+        const std::string_view key = fact.substr(0, equals);
+        const std::string_view value = fact.substr(equals + 1);
+        if (isFact(key, "type")) {
+            type = toLowerAscii(std::string(value));
+        } else if (isFact(key, "size")) {
             std::uint64_t size = 0;
             if (parseUnsignedDec(value, size)) {
                 parsed.size = size;
                 parsed.has_size = true;
             }
-        } else if (key == "modify") {
+        } else if (isFact(key, "modify")) {
             std::uint64_t timestamp = 0;
             if (parseMlsdUtcTimestamp(value, timestamp))
                 parsed.mtime = timestamp;
-        } else if (key == "unix.mode") {
+        } else if (isFact(key, "unix.mode")) {
+            // strtoul needs a terminated string; a mode fits in the
+            // string's own buffer.
+            const std::string mode(value);
             char *endPointer = nullptr;
             errno = 0;
-            const unsigned long mode =
-                std::strtoul(value.c_str(), &endPointer, 8);
+            const unsigned long modeBits =
+                std::strtoul(mode.c_str(), &endPointer, 8);
             if (errno == 0 && endPointer && *endPointer == '\0')
-                parsed.mode = static_cast<std::uint32_t>(mode & 07777u);
-        } else if (key == "unix.uid") {
+                parsed.mode = static_cast<std::uint32_t>(modeBits & 07777u);
+        } else if (isFact(key, "unix.uid")) {
             std::uint64_t uid = 0;
             if (parseUnsignedDec(value, uid)) {
                 parsed.uid = static_cast<std::uint32_t>(std::min<std::uint64_t>(
                     uid, std::numeric_limits<std::uint32_t>::max()));
             }
-        } else if (key == "unix.gid") {
+        } else if (isFact(key, "unix.gid")) {
             std::uint64_t gid = 0;
             if (parseUnsignedDec(value, gid)) {
                 parsed.gid = static_cast<std::uint32_t>(std::min<std::uint64_t>(
@@ -189,9 +219,9 @@ void finishMlsxEntry(FileInfo &parsed, bool isDir, bool isLink) {
     }
 }
 
-bool parseMlsdLine(const std::string &raw, FileInfo &info, bool &emit) {
+bool parseMlsdLine(std::string_view raw, FileInfo &info, bool &emit) {
     emit = false;
-    if (trimAscii(raw).empty())
+    if (trimAsciiView(raw).empty())
         return true;
 
     FileInfo parsed{};
@@ -302,11 +332,13 @@ ListingParseStatus parseFtpMlsdListing(const std::string &payload,
                                        const ListingParserLimits &limits) {
     out.clear();
     RemoteListingBudget budget(limits.maxEntries, limits.maxNameBytes);
-    std::istringstream input(payload);
-    std::string line;
-    while (std::getline(input, line)) {
-        const std::string normalized = trimAscii(line);
-        if (normalized.empty())
+    std::string_view rest(payload);
+    while (!rest.empty()) {
+        const std::size_t newline = rest.find('\n');
+        const std::string_view line = rest.substr(0, newline);
+        rest = newline == std::string_view::npos ? std::string_view()
+                                                 : rest.substr(newline + 1);
+        if (trimAsciiView(line).empty())
             continue;
         FileInfo info{};
         bool emit = false;

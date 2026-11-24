@@ -9,6 +9,17 @@
 #include <utility>
 #include <vector>
 
+// Set in builds with ThreadSanitizer, which some tests cannot run under.
+#if defined(__SANITIZE_THREAD__)
+#define OPENSCP_THREAD_SANITIZER 1
+#elif defined(__has_feature)
+// cppcheck 2.22 also tries __has_feature as a plain macro, false positive.
+// cppcheck-suppress syntaxError
+#if __has_feature(thread_sanitizer)
+#define OPENSCP_THREAD_SANITIZER 1
+#endif
+#endif
+
 namespace openscp::test {
 
 class TestContext {

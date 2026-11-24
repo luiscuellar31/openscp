@@ -21,17 +21,6 @@ using openscpui::SingleInstance;
 // OpenSCP for that data folder and exits with the role it got.
 constexpr char kLaterLaunchFolder[] = "OPENSCP_SINGLE_INSTANCE_TEST_FOLDER";
 
-// ThreadSanitizer fails one of its own checks when QProcess starts a program.
-#if defined(__SANITIZE_THREAD__)
-#define OPENSCP_THREAD_SANITIZER 1
-#elif defined(__has_feature)
-// cppcheck 2.22 also tries __has_feature as a plain macro, false positive.
-// cppcheck-suppress syntaxError
-#if __has_feature(thread_sanitizer)
-#define OPENSCP_THREAD_SANITIZER 1
-#endif
-#endif
-
 // Lets the primary's local server handle what has arrived, until `done`
 // holds or ten seconds pass.
 bool processEventsUntil(const std::function<bool()> &done) {

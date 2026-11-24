@@ -2,9 +2,52 @@
 #include "TestHarness.hpp"
 #include "curl/CurlListingParser.hpp"
 
+#include <atomic>
+#include <cstddef>
+#include <cstdint>
+#include <cstdlib>
+#include <new>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
+
+// ThreadSanitizer's runtime brings its own operator new and delete, so its
+// builds skip the allocation count.
+#ifndef OPENSCP_THREAD_SANITIZER
+namespace {
+
+// Counts the allocations made while it is on, so that tests can see what a
+// parser allocates per entry.
+std::atomic<bool> countingAllocations{false};
+std::atomic<std::size_t> allocationCount{0};
+
+} // namespace
+
+void *operator new(std::size_t size) {
+    if (countingAllocations.load(std::memory_order_relaxed))
+        allocationCount.fetch_add(1, std::memory_order_relaxed);
+    if (void *memory = std::malloc(size == 0 ? 1 : size))
+        return memory;
+    throw std::bad_alloc();
+}
+
+// Inlined into code that took the memory from operator new, GCC 11 reports
+// these free() calls as a mismatch; kept out of line, they compile clean.
+#ifdef __GNUC__
+#define OPENSCP_OUT_OF_LINE __attribute__((noinline))
+#else
+#define OPENSCP_OUT_OF_LINE
+#endif
+
+OPENSCP_OUT_OF_LINE void operator delete(void *memory) noexcept {
+    std::free(memory);
+}
+
+OPENSCP_OUT_OF_LINE void operator delete(void *memory, std::size_t) noexcept {
+    std::free(memory);
+}
+#endif
 
 namespace {
 
@@ -114,6 +157,46 @@ OPENSCP_TEST(testFtpMlsdListingLimitsAreTransactional, test) {
                "MLSD should accept payloads exactly within both limits");
 }
 
+OPENSCP_TEST(testFtpMlsdListingReadsEntriesInPlace, test) {
+#if defined(OPENSCP_THREAD_SANITIZER)
+    test.skip("ThreadSanitizer brings its own operator new");
+#elif defined(_MSC_VER) && defined(_ITERATOR_DEBUG_LEVEL) &&                   \
+    _ITERATOR_DEBUG_LEVEL != 0
+    test.skip("MSVC's checked iterators allocate for every string");
+#else
+    // A listing can hold many thousands of entries, read for every folder a
+    // transfer walks: copying each line and fact cost several allocations
+    // per entry. Only the names, too long to fit inside their strings,
+    // should allocate.
+    constexpr std::size_t kEntries = 1000;
+    std::string payload;
+    for (std::size_t index = 0; index < kEntries; ++index) {
+        payload += "Type=file;Size=12345;Modify=20240102030405;"
+                   "UNIX.mode=0644;UNIX.uid=1000;UNIX.gid=1000; "
+                   "a name longer than any short string " +
+                   std::to_string(index) + "\r\n";
+    }
+    std::vector<openscp::FileInfo> entries;
+    allocationCount = 0;
+    countingAllocations = true;
+    const ListingParseStatus status =
+        openscp::curlparser::parseFtpMlsdListing(payload, entries);
+    countingAllocations = false;
+    test.check(
+        status == ListingParseStatus::Success && entries.size() == kEntries &&
+            entries.back().name == "a name longer than any short string 999" &&
+            entries.back().has_size && entries.back().size == 12345 &&
+            entries.back().mode == (0100000u | 0644u) &&
+            entries.back().uid == 1000 && entries.back().mtime > 0,
+        "MLSD should read every entry and its facts");
+    test.check(allocationCount.load() < 2 * kEntries,
+               "reading an MLSD entry should allocate little more than its "
+               "name, made " +
+                   std::to_string(allocationCount.load()) +
+                   " allocations for " + std::to_string(kEntries) + " entries");
+#endif
+}
+
 OPENSCP_TEST(testFtpListListingLimitsAndMalformedInput, test) {
     const std::string payload = "-rw-r--r-- 1 user group 1 Jan 01 2024 alpha\n"
                                 "01-01-24  12:00PM       <DIR> beta\n";
@@ -163,6 +246,26 @@ OPENSCP_TEST(testFtpMlsdReportsSymbolicLinks, test) {
                "a link should keep its permission bits");
     test.check((entries[2].mode & 0170000u) == 0100000u,
                "a file next to the links should stay a regular file");
+}
+
+OPENSCP_TEST(testFtpMlsdModifyTimesAreUtc, test) {
+    // The time of the epoch, a leap second at the end of a leap day, a day
+    // past the end of its month and the last time MLSD allows, as timegm
+    // reads them.
+    const std::vector<std::pair<std::string, std::uint64_t>> times = {
+        {"19700101000000", 0},
+        {"20240229235960", 1709251200},
+        {"20230231000000", 1677801600},
+        {"99991231235959", 253402300799}};
+    for (const auto &[modify, epoch] : times) {
+        std::vector<openscp::FileInfo> entries;
+        test.check(openscp::curlparser::parseFtpMlsdListing(
+                       "type=file;modify=" + modify + "; f\r\n", entries) ==
+                           ListingParseStatus::Success &&
+                       entries.size() == 1 && entries.front().mtime == epoch,
+                   "MLSD should read modify=" + modify + " as " +
+                       std::to_string(epoch));
+    }
 }
 
 OPENSCP_TEST(testFtpMlstReplyReadsTheEntryLine, test) {
