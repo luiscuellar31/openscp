@@ -116,7 +116,10 @@ an existing file, as IIS does by default, the FTP backend moves that file aside
 under a free name and renames again, then deletes it, or moves it back if the
 rename still fails; publishing an upload and a rename that replaces a file
 both do this. Once the file is aside, those steps do not stop for a pause or a
-cancel, which would leave nothing at the destination.
+cancel, which would leave nothing at the destination. SFTP does the same when
+its server lacks posix-rename: there `interrupt()` would shut the connection
+down, so while the file is aside it only notes the interrupt and shuts down
+once the replacement ends.
 
 SFTP and SCP uploads give the remote file the local file's permission bits,
 as OpenSSH's sftp and scp do. SFTP writes the `.part` with mode 0600 and

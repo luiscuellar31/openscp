@@ -40,6 +40,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <future>
 #include <iostream>
 #include <iterator>
@@ -75,6 +76,15 @@ struct Libssh2SftpClientTestAccess {
         std::lock_guard lock(client.stateMutex_);
         client.sock_ = socket;
         client.connected_.store(true);
+    }
+
+    // Runs `during` while `client` holds off interrupts, as a replacement
+    // does once it moves the old destination aside.
+    static void holdInterrupts(Libssh2SftpClient &client,
+                               const std::function<void()> &during) {
+        Libssh2SftpClient::InterruptHold hold(client);
+        hold.engage();
+        during();
     }
 };
 
@@ -183,6 +193,34 @@ OPENSCP_TEST(test_concurrent_disconnect_unblocks_io_and_preserves_reused_socket,
             "and live");
     ::close(reused[0]);
     ::close(reused[1]);
+}
+
+OPENSCP_TEST(test_interrupt_waits_for_a_replaced_file_to_be_back_in_place, t) {
+    // Without posix-rename, a replacement moves the old file aside before it
+    // renames the new one into place. A pause in between shut the connection
+    // down and left the old file aside with nothing in its place.
+    int pair[2] = {-1, -1};
+    t.check(::socketpair(AF_UNIX, SOCK_STREAM, 0, pair) == 0,
+            "interrupt fixture should create a local transport");
+    if (pair[0] < 0)
+        return;
+    const auto peerSeesShutdown = [&](int timeoutMs) {
+        pollfd peer{pair[1], POLLIN, 0};
+        char byte = 0;
+        return ::poll(&peer, 1, timeoutMs) > 0 &&
+               ::recv(pair[1], &byte, 1, MSG_DONTWAIT) == 0;
+    };
+    openscp::Libssh2SftpClient client;
+    openscp::Libssh2SftpClientTestAccess::attachSocket(client, pair[0]);
+    bool keptOpen = false;
+    openscp::Libssh2SftpClientTestAccess::holdInterrupts(client, [&] {
+        client.interrupt();
+        keptOpen = client.isConnected() && !peerSeesShutdown(0);
+    });
+    t.check(keptOpen, "an interrupt must wait while the old file is aside");
+    t.check(peerSeesShutdown(1000) && !client.isConnected(),
+            "the interrupt must take effect once the file is back in place");
+    ::close(pair[1]);
 }
 
 OPENSCP_TEST(test_tcp_wait_deadline_and_cancellation, t) {

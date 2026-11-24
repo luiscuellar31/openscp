@@ -114,6 +114,23 @@ class Libssh2SftpClient : public RemoteClient {
         std::unique_lock<std::recursive_timed_mutex> ioLock_;
     };
 
+    // Once engaged, holds off interrupt() until it ends, and then carries out
+    // an interrupt that came meanwhile. A replacement engages it before it
+    // moves the old destination aside, so that a pause cannot leave nothing
+    // in its place.
+    class InterruptHold {
+        public:
+        explicit InterruptHold(Libssh2SftpClient &owner) : owner_(owner) {}
+        ~InterruptHold();
+        InterruptHold(const InterruptHold &) = delete;
+        InterruptHold &operator=(const InterruptHold &) = delete;
+        void engage();
+
+        private:
+        Libssh2SftpClient &owner_;
+        bool engaged_ = false;
+    };
+
     StructuredErrorScope beginStructuredOperation(std::string &err,
                                                   bool mutation = false);
     RemoteError classifyStructuredFailure(const std::string &message,
@@ -130,6 +147,9 @@ class Libssh2SftpClient : public RemoteClient {
     LocalFileDurability localFileDurability_ =
         LocalFileDurability::FileAndDirectory;
     mutable std::mutex stateMutex_;
+    // Guarded by stateMutex_; see InterruptHold.
+    bool interruptsHeld_ = false;
+    bool interruptDeferred_ = false;
     // Timed, so that disconnect() can wait for it between cancellations.
     mutable std::recursive_timed_mutex ioMutex_;
 #ifdef _WIN32

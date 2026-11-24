@@ -33,6 +33,7 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <utility>
 #include <vector>
 #ifndef _WIN32
 #include <fcntl.h>
@@ -468,7 +469,8 @@ bool is_regular_remote_file(LIBSSH2_SFTP *sftp, const std::string &path) {
 // regular file aside before the v3 rename, and restore it if that rename fails.
 // This fallback is not atomic, but never deletes the old file first.
 bool rename_remote_with_backup(LIBSSH2_SFTP *sftp, const std::string &from,
-                               const std::string &to, std::string *why) {
+                               const std::string &to, std::string *why,
+                               const std::function<void()> &holdInterrupts) {
     std::array<unsigned char, 12> nonce{};
     if (RAND_bytes(nonce.data(), static_cast<int>(nonce.size())) != 1) {
         if (why)
@@ -498,6 +500,10 @@ bool rename_remote_with_backup(LIBSSH2_SFTP *sftp, const std::string &from,
         return false;
     }
 
+    // A pause must not stop the steps that put a file back in place of the
+    // old one.
+    if (holdInterrupts)
+        holdInterrupts();
     const int backupRc = rename_sftp_v3(sftp, to, backup);
     if (backupRc != 0) {
         describe_rename_failure("backup", backupRc,
@@ -533,7 +539,8 @@ bool rename_remote_with_backup(LIBSSH2_SFTP *sftp, const std::string &from,
 // existing destination on OpenSSH. Prefer the atomic posix-rename@openssh.com
 // extension when available; otherwise use a backup and v3 rename.
 bool rename_remote(LIBSSH2_SFTP *sftp, const std::string &from,
-                   const std::string &to, bool overwrite, std::string *why) {
+                   const std::string &to, bool overwrite, std::string *why,
+                   const std::function<void()> &holdInterrupts) {
     if (!sftp) {
         if (why)
             *why = "SFTP handle is null";
@@ -573,7 +580,7 @@ bool rename_remote(LIBSSH2_SFTP *sftp, const std::string &from,
          sftpErr == LIBSSH2_FX_FILE_ALREADY_EXISTS) &&
         is_regular_remote_file(sftp, from) &&
         is_regular_remote_file(sftp, to)) {
-        return rename_remote_with_backup(sftp, from, to, why);
+        return rename_remote_with_backup(sftp, from, to, why, holdInterrupts);
     }
     describe_rename_failure("rename", rc, sftpErr, why);
     return false;
@@ -3474,10 +3481,32 @@ void Libssh2SftpClient::interrupt() {
     std::lock_guard<std::mutex> lk(stateMutex_);
     if (sock_ == kInvalidSocket)
         return;
+    if (interruptsHeld_) {
+        interruptDeferred_ = true;
+        return;
+    }
     // libssh2 cannot abandon a blocking call, so the socket is shut down and
     // the session cannot be used again.
     connected_.store(false);
     libssh2detail::shutdownSocket(sock_);
+}
+
+void Libssh2SftpClient::InterruptHold::engage() {
+    std::lock_guard<std::mutex> lk(owner_.stateMutex_);
+    owner_.interruptsHeld_ = true;
+    engaged_ = true;
+}
+
+Libssh2SftpClient::InterruptHold::~InterruptHold() {
+    if (!engaged_)
+        return;
+    std::lock_guard<std::mutex> lk(owner_.stateMutex_);
+    owner_.interruptsHeld_ = false;
+    if (std::exchange(owner_.interruptDeferred_, false) &&
+        owner_.sock_ != kInvalidSocket) {
+        owner_.connected_.store(false);
+        libssh2detail::shutdownSocket(owner_.sock_);
+    }
 }
 
 bool Libssh2SftpClient::list(const std::string &remote_path,
@@ -4097,7 +4126,9 @@ bool Libssh2SftpClient::put(
                                LIBSSH2_SFTP_SETSTAT, &mode);
 
     std::string rnErr;
-    if (!rename_remote(sftp_, remotePart, remote, true, &rnErr)) {
+    InterruptHold hold(*this);
+    if (!rename_remote(sftp_, remotePart, remote, true, &rnErr,
+                       [&hold] { hold.engage(); })) {
         err =
             std::string("Could not finalize upload (.part -> destination): ") +
             rnErr;
@@ -4329,7 +4360,9 @@ bool Libssh2SftpClient::rename(const std::string &from, const std::string &to,
     auto structuredErrorScope = beginStructuredOperation(err, true);
     if (!ensure_sftp_ready(connected_, sftp_, err))
         return false;
-    if (!rename_remote(sftp_, from, to, overwrite, &err)) {
+    InterruptHold hold(*this);
+    if (!rename_remote(sftp_, from, to, overwrite, &err,
+                       [&hold] { hold.engage(); })) {
         if (err.empty())
             err = "sftp_rename_ex failed";
         return false;
