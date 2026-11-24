@@ -189,7 +189,10 @@ and disconnect repeats that until the I/O mutex is free.
 
 An SSH jump host runs `ssh -W host:port` with the arguments that
 `ssh_jump_command()` builds for both platforms. On POSIX, ssh gets one end of a
-`socketpair()` as its standard input and output and libssh2 the other. On
+`socketpair()` as its standard input and output and libssh2 the other. Its
+descriptors are close-on-exec from the start, atomically on Linux, and ssh
+keeps no descriptor but its standard streams, so tunnels that start at once
+never hold each other's connections open. On
 Windows, `SshJumpTunnel` starts ssh.exe, found in an absolute folder of `PATH`
 but never through the current directory or a relative entry, or else the
 OpenSSH client that Windows installs, through

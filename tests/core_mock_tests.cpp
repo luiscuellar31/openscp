@@ -2671,6 +2671,52 @@ OPENSCP_TEST(test_jump_host_in_brackets_reaches_ssh_as_an_address, t) {
     t.check(last == "2001:db8::1",
             "ssh should get the jump address without brackets, got: " + last);
 }
+
+OPENSCP_TEST(test_jump_ssh_keeps_only_its_standard_streams, t) {
+    // Another thread may be making descriptors, such as another tunnel's,
+    // that are not close-on-exec yet. An ssh that kept one would keep that
+    // connection open after its own ssh exits.
+    const fs::path listing = makeTempFilePath("jump-descriptors");
+    const fs::path standIn = listing.parent_path() / "ssh";
+    {
+        std::ofstream script(standIn);
+        script << "#!/bin/sh\nls /dev/fd/ > '" << listing.string() << "'\n";
+    }
+    std::error_code ec;
+    fs::permissions(standIn, fs::perms::owner_all, ec);
+    int straggler[2] = {-1, -1};
+    t.check(::pipe(straggler) == 0, "a pipe should be created");
+    // A number that ls does not take for itself.
+    const int strayDescriptor = ::fcntl(straggler[1], F_DUPFD, 100);
+    std::string error;
+    {
+        openscp::testsupport::ScopedEnvironment environment;
+        const char *path = std::getenv("PATH");
+        environment.set("PATH", standIn.parent_path().string() + ":" +
+                                    (path ? path : ""));
+        openscp::Libssh2SftpClient client;
+        openscp::SessionOptions options = validOptions();
+        options.host = "127.0.0.1";
+        options.jump_host = std::string("jump.example");
+        options.jump_port = 22;
+        (void)client.connect(options, error);
+    }
+    std::vector<std::string> open;
+    std::ifstream written(listing);
+    for (std::string line; std::getline(written, line);)
+        open.push_back(line);
+    ::close(straggler[0]);
+    ::close(straggler[1]);
+    ::close(strayDescriptor);
+    fs::remove_all(listing.parent_path(), ec);
+    const auto has = [&open](const std::string &descriptor) {
+        return std::find(open.begin(), open.end(), descriptor) != open.end();
+    };
+    t.check(strayDescriptor > STDERR_FILENO && has("0") && has("2") &&
+                !has(std::to_string(strayDescriptor)),
+            "ssh should start with its standard streams and none of the "
+            "descriptors other threads leave open");
+}
 #endif
 
 #ifdef _WIN32

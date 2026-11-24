@@ -108,6 +108,12 @@ bool initializeSockets(std::string &error) {
 }
 
 SocketHandle openSocket(int family, int type, int protocol) {
+#ifdef __linux__
+    // Close-on-exec from the start: a program that another thread starts
+    // meanwhile, such as a jump tunnel's ssh, must not hold the connection.
+    const int descriptor = ::socket(family, type | SOCK_CLOEXEC, protocol);
+    return descriptor < 0 ? kInvalidSocket : descriptor;
+#else
     const int descriptor = ::socket(family, type, protocol);
     if (descriptor < 0)
         return kInvalidSocket;
@@ -118,6 +124,7 @@ SocketHandle openSocket(int family, int type, int protocol) {
         return kInvalidSocket;
     }
     return descriptor;
+#endif
 }
 
 void closeSocket(SocketHandle socket) noexcept {

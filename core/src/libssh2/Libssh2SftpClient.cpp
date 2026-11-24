@@ -1833,6 +1833,41 @@ std::string read_jump_tunnel_stderr(int fd) {
     return trim_ascii_whitespace(out);
 }
 
+// The tunnel's descriptors are close-on-exec from the start, so a program
+// that another thread starts meanwhile, such as another tunnel's ssh, cannot
+// hold one open: atomically on Linux, at once elsewhere.
+#ifdef __linux__
+int socketpair_close_on_exec(int fds[2]) {
+    return ::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, fds);
+}
+
+int pipe_close_on_exec(int fds[2]) {
+    return ::pipe2(fds, O_CLOEXEC);
+}
+#else
+void set_close_on_exec(int fd) {
+    const int flags = ::fcntl(fd, F_GETFD);
+    if (flags >= 0)
+        (void)::fcntl(fd, F_SETFD, flags | FD_CLOEXEC);
+}
+
+int socketpair_close_on_exec(int fds[2]) {
+    if (::socketpair(AF_UNIX, SOCK_STREAM, 0, fds) != 0)
+        return -1;
+    set_close_on_exec(fds[0]);
+    set_close_on_exec(fds[1]);
+    return 0;
+}
+
+int pipe_close_on_exec(int fds[2]) {
+    if (::pipe(fds) != 0)
+        return -1;
+    set_close_on_exec(fds[0]);
+    set_close_on_exec(fds[1]);
+    return 0;
+}
+#endif
+
 bool spawn_ssh_jump_tunnel(const SessionOptions &opt, int &sockOut, int &pidOut,
                            int &stderrFdOut, std::string &err) {
     sockOut = -1;
@@ -1843,13 +1878,13 @@ bool spawn_ssh_jump_tunnel(const SessionOptions &opt, int &sockOut, int &pidOut,
         return false;
 
     int pairfd[2] = {-1, -1};
-    if (::socketpair(AF_UNIX, SOCK_STREAM, 0, pairfd) != 0) {
+    if (socketpair_close_on_exec(pairfd) != 0) {
         err = std::string("socketpair failed: ") + std::strerror(errno);
         return false;
     }
 
     int stderrPipe[2] = {-1, -1};
-    if (::pipe(stderrPipe) != 0) {
+    if (pipe_close_on_exec(stderrPipe) != 0) {
         err = std::string("pipe failed: ") + std::strerror(errno);
         ::close(pairfd[0]);
         ::close(pairfd[1]);
@@ -1890,8 +1925,32 @@ bool spawn_ssh_jump_tunnel(const SessionOptions &opt, int &sockOut, int &pidOut,
     if (stderrPipe[1] > STDERR_FILENO)
         posix_spawn_file_actions_addclose(&actions, stderrPipe[1]);
 
+    // ssh keeps only its standard streams, whatever descriptors other threads
+    // are creating without close-on-exec as it starts.
+    posix_spawnattr_t attributes;
+    if (const int attributesErr = posix_spawnattr_init(&attributes);
+        attributesErr != 0) {
+        err = std::string("posix_spawnattr_init failed: ") +
+              std::strerror(attributesErr);
+        ::close(pairfd[0]);
+        ::close(pairfd[1]);
+        ::close(stderrPipe[0]);
+        ::close(stderrPipe[1]);
+        return false;
+    }
+    struct AttributesGuard {
+        posix_spawnattr_t *attributes;
+        ~AttributesGuard() { posix_spawnattr_destroy(attributes); }
+    } attributesGuard{&attributes};
+#if defined(__APPLE__)
+    (void)posix_spawnattr_setflags(&attributes, POSIX_SPAWN_CLOEXEC_DEFAULT);
+#elif defined(__GLIBC__) &&                                                    \
+    (__GLIBC__ > 2 || (__GLIBC__ == 2 && __GLIBC_MINOR__ >= 34))
+    posix_spawn_file_actions_addclosefrom_np(&actions, STDERR_FILENO + 1);
+#endif
+
     pid_t pid = -1;
-    const int spawnRes = posix_spawnp(&pid, "ssh", &actions, nullptr,
+    const int spawnRes = posix_spawnp(&pid, "ssh", &actions, &attributes,
                                       argv.data(), openscp_environ);
 
     ::close(pairfd[1]);
@@ -1904,12 +1963,6 @@ bool spawn_ssh_jump_tunnel(const SessionOptions &opt, int &sockOut, int &pidOut,
         return false;
     }
 
-    const int fdFlags = ::fcntl(pairfd[0], F_GETFD);
-    if (fdFlags >= 0)
-        (void)::fcntl(pairfd[0], F_SETFD, fdFlags | FD_CLOEXEC);
-    const int stderrFdFlags = ::fcntl(stderrPipe[0], F_GETFD);
-    if (stderrFdFlags >= 0)
-        (void)::fcntl(stderrPipe[0], F_SETFD, stderrFdFlags | FD_CLOEXEC);
     const int stderrStatusFlags = ::fcntl(stderrPipe[0], F_GETFL);
     if (stderrStatusFlags >= 0)
         (void)::fcntl(stderrPipe[0], F_SETFL, stderrStatusFlags | O_NONBLOCK);
