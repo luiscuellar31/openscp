@@ -317,6 +317,9 @@ class TransferManager : public QObject {
     void reserveCleanupSourceLocked(const TransferTask &task);
     void releaseTaskPathsLocked(quint64 taskId);
     bool dependencySatisfiedLocked(const TransferTask &task) const;
+    // A worker's task starts and ends running only through these two.
+    void markTaskRunningLocked(TransferTask &task, qint64 nowMs);
+    void releaseRunningTaskLocked(quint64 taskId);
     std::optional<TransferTask> pickRunnableTaskLocked(std::size_t slotIndex);
     void workerLoop(std::size_t slotIndex, std::stop_token stopToken);
     // connectionFailed is set when no connection could be opened, as opposed

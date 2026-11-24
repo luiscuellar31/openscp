@@ -52,9 +52,10 @@ struct TransferManagerTestAccess {
     static void markActiveAndWaiting(TransferManager &manager, quint64 taskId) {
         std::lock_guard<std::mutex> lock(manager.mtx_);
         TransferTask *task = manager.taskForIdLocked(taskId);
+        manager.markTaskRunningLocked(*task,
+                                      QDateTime::currentMSecsSinceEpoch());
         manager.setTaskStatusLocked(*task,
                                     TransferTask::Status::WaitingForConnection);
-        manager.activeTaskIds_.insert(taskId);
         manager.connectionSuspended_ = true;
     }
 
@@ -127,11 +128,8 @@ struct TransferManagerTestAccess {
 
     static void markActive(TransferManager &manager, quint64 taskId) {
         std::lock_guard<std::mutex> lock(manager.mtx_);
-        auto &task = *manager.taskForIdLocked(taskId);
-        manager.setTaskStatusLocked(task, TransferTask::Status::Running);
-        manager.activeTaskIds_.insert(taskId);
-        manager.taskControls_.startRunning(taskId, task.speedLimitKBps);
-        manager.running_.fetch_add(1);
+        manager.markTaskRunningLocked(*manager.taskForIdLocked(taskId),
+                                      QDateTime::currentMSecsSinceEpoch());
     }
 
     static void markDone(TransferManager &manager, quint64 taskId) {
@@ -198,10 +196,7 @@ struct TransferManagerTestAccess {
             const auto selected = manager.pickRunnableTaskLocked(0);
             if (!selected)
                 break;
-            manager.releaseTaskPathsLocked(selected->taskId);
-            manager.activeTaskIds_.erase(selected->taskId);
-            manager.taskControls_.finishRunning(selected->taskId);
-            manager.running_.fetch_sub(1);
+            manager.releaseRunningTaskLocked(selected->taskId);
             auto *stored = manager.taskForIdLocked(selected->taskId);
             manager.setTaskStatusLocked(*stored, TransferTask::Status::Queued);
         }
@@ -238,10 +233,7 @@ struct TransferManagerTestAccess {
             }
             // Requeue outside the timed region so availability remains stable.
             if (selected) {
-                manager.releaseTaskPathsLocked(selected->taskId);
-                manager.activeTaskIds_.erase(selected->taskId);
-                manager.taskControls_.finishRunning(selected->taskId);
-                manager.running_.fetch_sub(1);
+                manager.releaseRunningTaskLocked(selected->taskId);
                 manager.setTaskStatusLocked(
                     *manager.taskForIdLocked(selected->taskId),
                     TransferTask::Status::Queued);
@@ -1457,6 +1449,21 @@ OPENSCP_TEST(testStatusChangesAloneDoNotRewriteTheQueue, test) {
                    return savedTasks() == 2;
                }),
                "removing a task should still be saved");
+}
+
+OPENSCP_TEST(testTasksTheTestsStartLookStartedByAWorker, test) {
+    // The test access starts tasks through the scheduler's own transition,
+    // so the tests never see a running task that production cannot make.
+    TransferManager manager;
+    const quint64 id = manager.enqueueRemoteDelete(QStringLiteral("/started"),
+                                                   false, testBatchOptions());
+    TransferManagerTestAccess::markActive(manager, id);
+    const auto task = manager.taskSnapshot(id);
+    test.check(task && task->status == TransferTask::Status::Running &&
+                   task->startedAtMs > 0,
+               "a task the tests start should have its start time, as one a "
+               "worker starts does");
+    TransferManagerTestAccess::finishActive(manager, id);
 }
 
 OPENSCP_TEST(testResumeDuringAFailedConnectionRequeuesTheTask, test) {

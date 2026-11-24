@@ -1178,16 +1178,29 @@ TransferManager::pickRunnableTaskLocked(std::size_t slotIndex) {
         return std::nullopt;
 
     TransferTask &task = *queueStore_.nodes()[*taskIndex];
-    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    markTaskRunningLocked(task, QDateTime::currentMSecsSinceEpoch());
+    return task;
+}
+
+void TransferManager::markTaskRunningLocked(TransferTask &task, qint64 nowMs) {
     setTaskStatusLocked(task, Status::Running);
     task.error.clear();
-    task.startedAtMs = now;
+    task.startedAtMs = nowMs;
     task.finishedAtMs = 0;
     task.nextRetryAtMs = 0;
     activeTaskIds_.insert(task.taskId);
     taskControls_.startRunning(task.taskId, task.speedLimitKBps);
     running_.fetch_add(1);
-    return task;
+}
+
+void TransferManager::releaseRunningTaskLocked(quint64 taskId) {
+    activeTaskIds_.erase(taskId);
+    taskControls_.finishRunning(taskId);
+    releaseTaskPathsLocked(taskId);
+    int running = running_.load();
+    while (running > 0 &&
+           !running_.compare_exchange_weak(running, running - 1)) {
+    }
 }
 
 void TransferManager::workerLoop(std::size_t slotIndex,
@@ -3087,17 +3100,11 @@ void TransferManager::finishWorkerTask(quint64 taskId, qint64 precheckMs,
                 requeued = true;
             }
         }
-        activeTaskIds_.erase(taskId);
-        taskControls_.finishRunning(taskId);
-        releaseTaskPathsLocked(taskId);
+        releaseRunningTaskLocked(taskId);
         if (finalStatus == Status::Error || finalStatus == Status::Canceled ||
             finalStatus == Status::Warning) {
             dependencySkipped = skipDependentsOfFailedLocked(
                 taskId, QDateTime::currentMSecsSinceEpoch());
-        }
-        int running = running_.load();
-        while (running > 0 &&
-               !running_.compare_exchange_weak(running, running - 1)) {
         }
         removed = pruneTerminalHistoryLocked();
     }
