@@ -404,26 +404,6 @@ integrity_policy_from_env(TransferIntegrityPolicy fallback) {
     return fallback;
 }
 
-// Protect transfer workers from indefinite kernel-level socket blocking when
-// the peer/network disappears without a clean TCP close.
-void apply_transfer_socket_timeouts(libssh2detail::SocketHandle sock) {
-    if (sock == libssh2detail::kInvalidSocket)
-        return;
-#ifdef _WIN32
-    DWORD tvMs = 15000;
-    (void)::setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO,
-                       reinterpret_cast<const char *>(&tvMs), sizeof(tvMs));
-    (void)::setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO,
-                       reinterpret_cast<const char *>(&tvMs), sizeof(tvMs));
-#else
-    struct timeval tv {};
-    tv.tv_sec = 15;
-    tv.tv_usec = 0;
-    (void)::setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-    (void)::setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
-#endif
-}
-
 bool seek_local_file(FILE *f, std::uint64_t off, std::string *why) {
     return openscp::libssh2detail::seekLocalFile(f, off, why);
 }
@@ -2537,9 +2517,12 @@ bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions &opt,
                                       "hmac-sha2-512,hmac-sha2-256");
 #endif
 
-    // Ensure blocking mode and bounded waits before handshake/auth.
+    // Every libssh2 call on the session blocks for at most 20 seconds.
+    // libssh2 puts the socket in non-blocking mode and waits in poll(), so
+    // no call returns LIBSSH2_ERROR_EAGAIN and socket timeouts do nothing;
+    // interrupt() ends a call early by shutting the socket down.
     libssh2_session_set_blocking(session_, 1);
-    libssh2_session_set_timeout(session_, 20000); // 20s
+    libssh2_session_set_timeout(session_, 20000);
     if (libssh2_session_handshake(session_, sock_) != 0) {
         if (opt.jump_host.has_value() && !opt.jump_host->empty() &&
             describeJumpTunnelFailure(err)) {
@@ -2991,16 +2974,9 @@ bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions &opt,
                                tries < kMaxAgentTries) {
                             prev = identity;
                             ++tries;
-                            int arc = -1;
-                            for (;;) {
-                                arc = libssh2_agent_userauth(
-                                    agent, opt.username.c_str(), identity);
-                                if (arc != LIBSSH2_ERROR_EAGAIN)
-                                    break;
-                                std::this_thread::sleep_for(
-                                    std::chrono::milliseconds(50));
-                            }
-                            if (arc == 0) {
+                            if (libssh2_agent_userauth(agent,
+                                                       opt.username.c_str(),
+                                                       identity) == 0) {
                                 authed = true;
                                 break;
                             }
@@ -3026,13 +3002,8 @@ bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions &opt,
             long kbErrno = 0;
 
             auto do_password = [&]() {
-                for (;;) {
-                    rc_pw = libssh2_userauth_password(
-                        session_, opt.username.c_str(), opt.password->c_str());
-                    if (rc_pw != LIBSSH2_ERROR_EAGAIN)
-                        break;
-                    std::this_thread::sleep_for(std::chrono::milliseconds(50));
-                }
+                rc_pw = libssh2_userauth_password(
+                    session_, opt.username.c_str(), opt.password->c_str());
                 char *emsgPtr = nullptr;
                 int emlen = 0;
                 (void)libssh2_session_last_error(session_, &emsgPtr, &emlen, 0);
@@ -3056,14 +3027,8 @@ bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions &opt,
                 void **abs = libssh2_session_abstract(session_);
                 if (abs)
                     *abs = &ctx;
-                for (;;) {
-                    rc_kbd = libssh2_userauth_keyboard_interactive(
-                        session_, opt.username.c_str(),
-                        kbint_password_callback);
-                    if (rc_kbd != LIBSSH2_ERROR_EAGAIN)
-                        break;
-                    std::this_thread::sleep_for(std::chrono::milliseconds(50));
-                }
+                rc_kbd = libssh2_userauth_keyboard_interactive(
+                    session_, opt.username.c_str(), kbint_password_callback);
                 if (abs)
                     *abs = nullptr;
                 if (kbdCancelled) {
@@ -3630,7 +3595,6 @@ bool Libssh2SftpClient::checksum(
         return false;
     }
 
-    apply_transfer_socket_timeouts(sock_);
     Sha256Digest calculated{};
     std::string hashError;
     if (!hash_remote_full(sftp_, remote_path, calculated, &hashError,
@@ -3663,8 +3627,6 @@ bool Libssh2SftpClient::get(
     setLastDownloadModifiedTime(std::nullopt);
     if (!ensure_sftp_ready(connected_, sftp_, err))
         return false;
-
-    apply_transfer_socket_timeouts(sock_);
 
     const TransferIntegrityPolicy policy = transferIntegrityPolicy_;
     const std::string localPart = partialPathFor(local);
@@ -3884,8 +3846,6 @@ bool Libssh2SftpClient::put(
     auto structuredErrorScope = beginStructuredOperation(err);
     if (!ensure_sftp_ready(connected_, sftp_, err))
         return false;
-
-    apply_transfer_socket_timeouts(sock_);
 
     const TransferIntegrityPolicy policy = transferIntegrityPolicy_;
     const std::string remotePart = partialPathFor(remote);

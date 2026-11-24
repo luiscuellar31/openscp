@@ -188,8 +188,11 @@ a shared 20-second deadline. The platform's synchronous DNS resolver remains
 outside that TCP deadline. Its HTTP CONNECT sends the proxy credentials only
 after a 407 that offers Basic, over a new connection to the proxy, and names
 the other schemes a proxy asks for, which it does not support.
-libssh2's blocking handshake/authentication timeout is set explicitly. That
-20-second timeout also covers each blocking SFTP write, so an upload passes
+Every libssh2 call on an SSH session blocks for at most 20 seconds: libssh2
+puts the socket in non-blocking mode and waits in `poll()`, so no call returns
+`LIBSSH2_ERROR_EAGAIN` and socket timeouts do nothing, and `interrupt()` ends a
+call early by shutting the socket down. That timeout also covers each blocking
+SFTP write, so an upload passes
 about two seconds of data per write at the rate it has reached, from 32 KiB up
 to its 2 MiB buffer.
 SSH interruption and the initial disconnect shutdown hold the state mutex
