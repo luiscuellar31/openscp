@@ -109,11 +109,22 @@ SettingsSyncResult AppSettings::syncSecure() {
 SettingsSyncResult AppSettings::ensureOwnerOnly() const {
 #ifdef Q_OS_UNIX
     const QString path = fileName();
-    if (path.isEmpty() || !QFileInfo::exists(path))
+    const QFileInfo file(path);
+    if (path.isEmpty() || !file.exists())
         return {true, {}};
 
     constexpr QFileDevice::Permissions ownerOnly =
         QFileDevice::ReadOwner | QFileDevice::WriteOwner;
+    constexpr QFileDevice::Permissions modeBits =
+        ownerOnly | QFileDevice::ExeOwner | QFileDevice::ReadGroup |
+        QFileDevice::WriteGroup | QFileDevice::ExeGroup |
+        QFileDevice::ReadOther | QFileDevice::WriteOther |
+        QFileDevice::ExeOther;
+    // Every instance runs this when it closes, most of them after only
+    // reading: setting the same mode again would still change the file's
+    // metadata each time.
+    if ((file.permissions() & modeBits) == ownerOnly)
+        return {true, {}};
     if (!QFile::setPermissions(path, ownerOnly)) {
         return {false, QCoreApplication::translate(
                            "AppSettings",

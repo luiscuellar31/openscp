@@ -12,6 +12,7 @@
 #include <QDateTime>
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QSettings>
 #include <QStandardPaths>
 #include <QTemporaryDir>
@@ -22,6 +23,7 @@
 #include <initializer_list>
 #include <string>
 #include <system_error>
+#include <thread>
 #include <vector>
 
 #ifndef _WIN32
@@ -637,6 +639,47 @@ OPENSCP_TEST(testSettingsReadOnlyTheUsersOwnFile, test) {
     test.check(!named.contains(openscpui::settingskeys::kStagingRoot),
                "settings opened by name should read only the user's file");
 }
+
+#ifdef Q_OS_UNIX
+OPENSCP_TEST(testReadingSettingsLeavesTheirFileAlone, test) {
+    // Settings are opened and closed for every read; making an already
+    // private file private again changed its metadata each time.
+    QTemporaryDir folder;
+    const QString path = folder.filePath(QStringLiteral("settings.ini"));
+    {
+        openscpui::AppSettings store(path, QSettings::IniFormat);
+        store.setValue(QStringLiteral("key"), QStringLiteral("value"));
+    }
+    constexpr QFileDevice::Permissions othersMayRead =
+        QFileDevice::ReadGroup | QFileDevice::ReadOther;
+    QFileInfo file(path);
+    test.check(file.exists() && (file.permissions() & othersMayRead) == 0,
+               "a settings file should be written for its owner alone");
+    const QDateTime changed = file.metadataChangeTime();
+    // The clock must pass the last change, or a new one would not show.
+    while (QDateTime::currentDateTimeUtc() <= changed.addMSecs(20))
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    {
+        const openscpui::AppSettings store(path, QSettings::IniFormat);
+        (void)store.value(QStringLiteral("key"));
+    }
+    file.refresh();
+    test.check(file.metadataChangeTime() == changed,
+               "reading a setting should leave its file as it was");
+
+    test.check(QFile::setPermissions(path, QFileDevice::ReadOwner |
+                                               QFileDevice::WriteOwner |
+                                               othersMayRead),
+               "the settings file should take a looser mode");
+    {
+        const openscpui::AppSettings store(path, QSettings::IniFormat);
+        (void)store.value(QStringLiteral("key"));
+    }
+    file.refresh();
+    test.check((file.permissions() & othersMayRead) == 0,
+               "a settings file others can read should be made private again");
+}
+#endif
 
 OPENSCP_TEST(testLocalEntryNamesFollowThisComputer, test) {
     test.check(isValidLocalEntryName(QStringLiteral("report.txt")),
