@@ -38,10 +38,6 @@ namespace {
 std::mutex activeDestinationMutex;
 std::unordered_set<std::string> activeDestinations;
 
-std::string localPartialPath(const std::string &destination) {
-    return destination + ".part";
-}
-
 std::string localDestinationKey(const std::string &path) {
 #ifdef _WIN32
     // The full path, with the letter case NTFS ignores folded, from UTF-16:
@@ -1257,7 +1253,7 @@ bool downloadToLocalFile(CURL *curl, const std::string &destination,
                          const CurlTransportErrorMapper &transportErrorMapper,
                          const CurlResponseErrorMapper &responseErrorMapper,
                          RemoteError &failure, std::string &err) {
-    const std::string partial = localPartialPath(destination);
+    const std::string partial = partialPathFor(destination);
     ActiveDestinationLease destinationLease(localDestinationKey(destination));
     ActiveDestinationLease partialLease(localDestinationKey(partial));
     if (!destinationLease.acquired() || !partialLease.acquired()) {

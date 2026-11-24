@@ -4784,6 +4784,26 @@ OPENSCP_TEST(testRemovingDownloadKeepsAnotherDownloadsPartial, test) {
                "the last download to a destination should delete its partial");
 }
 
+OPENSCP_TEST(testRemovingADownloadWithALongNameDeletesItsPartial, test) {
+    // A name with no room for ".part" gets a shorter partial file from the
+    // core, which the queue must name the same way to delete it.
+    QTemporaryDir root;
+    const QString destination = root.filePath(QString(252, QLatin1Char('n')));
+    QFile partial(partialPathFor(destination));
+    test.check(partial.fileName() != destination + QStringLiteral(".part") &&
+                   partial.open(QIODevice::WriteOnly),
+               "the partial file of a long name should be created");
+    partial.close();
+
+    TransferManager manager;
+    const quint64 download =
+        manager.enqueueDownload(QStringLiteral("/remote/long"), destination);
+    manager.removeTask(download, true);
+    test.check(!QFile::exists(partial.fileName()),
+               "removing a download should delete its partial file, under "
+               "the name the core gave it");
+}
+
 OPENSCP_TEST(testRemovingFinishedTasksLeavesPartialFilesAlone, test) {
     QTemporaryDir root;
     const QString destination = root.filePath("done.dat");

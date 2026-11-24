@@ -2,6 +2,7 @@
 #pragma once
 
 #include "logic/transfers/ConflictCoordinator.hpp"
+#include "openscp/Protocol.hpp"
 #include "openscp/SafeLocalFile.hpp"
 
 #include <QString>
@@ -107,6 +108,12 @@ isTerminalTransferStatus(TransferTask::Status status) {
 [[nodiscard]] inline bool skippedAfterFailure(const TransferTask &task) {
     return task.status == TransferTask::Status::Skipped &&
            task.skippedByFailedDependency;
+}
+
+// The partial file a transfer to `destination` writes, as the core names it.
+[[nodiscard]] inline QString partialPathFor(const QString &destination) {
+    return QString::fromStdString(
+        openscp::partialPathFor(destination.toStdString()));
 }
 
 // Only an upload or download that has not finished its transfer can have left

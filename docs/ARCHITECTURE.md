@@ -123,6 +123,11 @@ as OpenSSH's sftp and scp do. SFTP writes the `.part` with mode 0600 and
 applies those bits just before the rename; FTP and WebDAV leave permissions to
 the server.
 
+`partialPathFor` names the `.part` for every protocol and for the queue's
+reservations and cleanup. A name with no room for the suffix within 255 bytes
+keeps its first bytes and a hash of the whole name instead, the same each
+time, so a resume finds it.
+
 Downloads write their local `.part` with mode 0600 too. Just before the
 rename, `applyDownloadPermissions` gives it the mode of the file it replaces
 or, for a new file, the remote mode from SFTP or SCP (0666 for FTP and WebDAV)

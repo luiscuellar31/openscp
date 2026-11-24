@@ -260,7 +260,7 @@ bool Libssh2ScpClient::get(
     }
     const std::size_t total = static_cast<std::size_t>(fileInfo.st_size);
 
-    const std::string partial = local + ".part";
+    const std::string partial = partialPathFor(local);
     std::string openError;
     std::FILE *localFile = localfiles::openRegularFileForWrite(
         partial, localfiles::WriteMode::Truncate, openError);

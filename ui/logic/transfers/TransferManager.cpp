@@ -619,8 +619,7 @@ void TransferManager::initializeConnectionStatusLocked(
 
 std::string TransferManager::destinationKey(const TransferTask &task,
                                             bool partial) const {
-    const QString path =
-        partial ? task.dst + QStringLiteral(".part") : task.dst;
+    const QString path = partial ? partialPathFor(task.dst) : task.dst;
     if (task.type == TransferTask::Type::Upload ||
         task.type == TransferTask::Type::CreateRemoteDirectory ||
         task.type == TransferTask::Type::DeleteRemoteFile ||
@@ -1841,8 +1840,8 @@ void TransferManager::removeTasks(const QVector<quint64> &taskIds,
             if (reserved) {
                 std::string cleanupError;
                 (void)openscp::localfiles::removeLocalPath(
-                    (taskNode->dst + QStringLiteral(".part")).toStdString(),
-                    false, cleanupError);
+                    partialPathFor(taskNode->dst).toStdString(), false,
+                    cleanupError);
                 {
                     std::lock_guard<std::mutex> lock(mtx_);
                     releaseTaskPathsLocked(taskNode->taskId);
@@ -1873,7 +1872,7 @@ void TransferManager::removeTasks(const QVector<quint64> &taskIds,
         cleanup.conflictPolicy = Policy::Skip;
         cleanups.push_back({TransferTask::Type::DeleteRemoteFile,
                             {},
-                            task.dst + QStringLiteral(".part"),
+                            partialPathFor(task.dst),
                             cleanup,
                             -1});
     }

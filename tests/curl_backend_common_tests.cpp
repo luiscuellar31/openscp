@@ -1326,6 +1326,71 @@ OPENSCP_TEST(testWebDavDownloadsKeepTheBytesTheServerSent, test) {
                "a download should ask IIS for the file itself");
 }
 
+#ifndef _WIN32
+OPENSCP_TEST(testWebDavDownloadsToANameAtTheLengthLimit, test) {
+    // With ".part" added, a name of 251 to 255 bytes passed the limit of a
+    // name, so its download failed at once.
+    const std::string multistatus =
+        "<?xml version=\"1.0\"?><d:multistatus xmlns:d=\"DAV:\"><d:response>"
+        "<d:href>/</d:href><d:propstat><d:prop><d:resourcetype>"
+        "<d:collection/></d:resourcetype></d:prop>"
+        "<d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>"
+        "</d:multistatus>";
+    openscp::testsupport::IntegrationTempDir directory;
+    if (!directory.isValid()) {
+        test.check(false, "the download test should create its directory");
+        return;
+    }
+    const std::filesystem::path local =
+        directory.path() / std::string(252, 'n');
+    std::string error;
+    bool downloaded = false;
+    {
+        LoopbackServer server([&](curl_socket_t socket) {
+            for (;;) {
+                const std::string request = readHttpRequest(socket);
+                if (request.empty())
+                    return;
+                if (request.starts_with("GET ")) {
+                    sendReply(socket, "HTTP/1.1 200 OK\r\n"
+                                      "Content-Length: 6\r\n\r\nhello\n");
+                    return;
+                }
+                sendReply(socket, "HTTP/1.1 207 Multi-Status\r\n"
+                                  "Content-Type: application/xml\r\n"
+                                  "Content-Length: " +
+                                      std::to_string(multistatus.size()) +
+                                      "\r\n\r\n" + multistatus);
+            }
+        });
+        test.check(server.listening(), "the WebDAV server should listen");
+        openscp::SessionOptions options;
+        options.protocol = openscp::Protocol::WebDav;
+        options.webdav_scheme = openscp::WebDavScheme::Http;
+        options.host = "127.0.0.1";
+        options.port = server.port();
+        options.username = "user";
+        options.password = "secret";
+        openscp::CurlWebDavClient client;
+        test.checkWithError(client.connect(options, error),
+                            "the WebDAV client should connect: ", error);
+        downloaded =
+            client.get("/short.txt", local.string(), error, {}, {}, false);
+    }
+    test.checkWithError(downloaded,
+                        "a name at the length limit should download: ", error);
+    std::ifstream saved(local, std::ios::binary);
+    const std::string bytes((std::istreambuf_iterator<char>(saved)),
+                            std::istreambuf_iterator<char>());
+    std::size_t entries = 0;
+    for ([[maybe_unused]] const auto &entry :
+         std::filesystem::directory_iterator(directory.path()))
+        ++entries;
+    test.check(bytes == "hello\n" && entries == 1,
+               "the download should leave only its file");
+}
+#endif
+
 OPENSCP_TEST(testVerifiedWebDavRefusesAnUntrustedCertificate, test) {
     // Without a CA file, curl checks the trusted roots of the system, which
     // on Windows come from its certificate store, not from OpenSSL.

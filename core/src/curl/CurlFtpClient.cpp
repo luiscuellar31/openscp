@@ -1116,7 +1116,8 @@ bool CurlFtpClient::put(const std::string &local, const std::string &remote,
     const SessionOptions &opt = *connection.options;
     const std::string &commandRoot = connection.commandRoot;
 
-    const std::string remotePartial = normalizeRemotePath(remote) + ".part";
+    const std::string remotePartial =
+        partialPathFor(normalizeRemotePath(remote));
     curlcommon::ActiveDestinationLease destinationLease(
         ftpDestinationKey(opt, remote));
     curlcommon::ActiveDestinationLease partialLease(

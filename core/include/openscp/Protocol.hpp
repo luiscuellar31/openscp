@@ -334,6 +334,43 @@ inline constexpr bool uploadsUsePartialFile(Protocol protocol,
     return protocol != Protocol::Scp || scpMode == ScpTransferMode::Auto;
 }
 
+// The file an unfinished transfer writes, "<destination>.part". Most file
+// systems and servers limit a name to 255 bytes, and Windows to 255 UTF-16
+// units, so a name with no room for the suffix keeps its first bytes and adds
+// a hash of the whole name, which keeps it apart from other long names and
+// makes it the same each time, for a resume to find.
+inline std::string partialPathFor(const std::string &destination) {
+    constexpr std::size_t kMaximumNameBytes = 255;
+    constexpr char kSuffix[] = ".part";
+    constexpr std::size_t kSuffixBytes = sizeof(kSuffix) - 1;
+#ifdef _WIN32
+    const std::size_t separator = destination.find_last_of("/\\");
+#else
+    const std::size_t separator = destination.rfind('/');
+#endif
+    const std::size_t nameStart =
+        separator == std::string::npos ? 0 : separator + 1;
+    if (destination.size() - nameStart + kSuffixBytes <= kMaximumNameBytes)
+        return destination + kSuffix;
+
+    std::uint64_t hash = 14695981039346656037ull; // 64-bit FNV-1a
+    for (std::size_t index = nameStart; index < destination.size(); ++index) {
+        hash ^= static_cast<unsigned char>(destination[index]);
+        hash *= 1099511628211ull;
+    }
+    std::string hashText(16, '0');
+    for (std::size_t digit = 16; digit-- > 0; hash >>= 4)
+        hashText[digit] = "0123456789abcdef"[hash & 0xfu];
+    // Bytes are counted, which never exceed UTF-16 units, and the cut falls
+    // between UTF-8 characters.
+    std::size_t kept = kMaximumNameBytes - 1 - hashText.size() - kSuffixBytes;
+    while (kept > 0 &&
+           (static_cast<unsigned char>(destination[nameStart + kept]) &
+            0xc0u) == 0x80u)
+        --kept;
+    return destination.substr(0, nameStart + kept) + '~' + hashText + kSuffix;
+}
+
 inline ProtocolCapabilities capabilitiesForProtocol(Protocol protocol) {
     ProtocolCapabilities capabilities;
     bool managedFilesSupported = protocol == Protocol::Sftp;

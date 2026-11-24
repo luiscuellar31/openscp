@@ -793,7 +793,8 @@ bool CurlWebDavClient::put(
     const auto &connection = operation.connection();
     const SessionOptions &opt = *connection.options;
 
-    const std::string remotePartial = normalizeRemotePath(remote) + ".part";
+    const std::string remotePartial =
+        partialPathFor(normalizeRemotePath(remote));
     curlcommon::ActiveDestinationLease destinationLease(
         webDavDestinationKey(opt, remote));
     curlcommon::ActiveDestinationLease partialLease(

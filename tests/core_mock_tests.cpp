@@ -2624,6 +2624,39 @@ OPENSCP_TEST(test_libssh2_recent_remote_modification, t) {
         "an out-of-range modification time should use the full check");
 }
 
+OPENSCP_TEST(test_partial_names_fit_the_name_limit, t) {
+    t.check(openscp::partialPathFor("/remote/report.pdf") ==
+                "/remote/report.pdf.part",
+            "a short name should just take the suffix");
+    const std::string fits(250, 'a');
+    t.check(openscp::partialPathFor("/dir/" + fits) == "/dir/" + fits + ".part",
+            "a name with room for the suffix should keep it all");
+
+    // A name of 251 to 255 bytes has no room for ".part".
+    const std::string tooLong(251, 'a');
+    const std::string partial = openscp::partialPathFor("/dir/" + tooLong);
+    const std::string partialName = partial.substr(std::string("/dir/").size());
+    t.check(partial.rfind("/dir/", 0) == 0 && partialName.size() == 255 &&
+                partialName.rfind(std::string(233, 'a') + "~", 0) == 0 &&
+                partialName.ends_with(".part"),
+            "a long name should keep its start and fit, got: " + partialName);
+    t.check(openscp::partialPathFor("/dir/" + tooLong) == partial,
+            "a name should always get the same partial file");
+    t.check(openscp::partialPathFor("/dir/" + std::string(250, 'a') + "b") !=
+                partial,
+            "two long names should not share a partial file");
+
+    // 85 characters of three bytes: 255 bytes, cut between characters.
+    std::string wide;
+    for (int character = 0; character < 85; ++character)
+        wide += "\xe6\x96\x87";
+    const std::string widePartial = openscp::partialPathFor(wide);
+    t.check(widePartial.size() == 231 + 1 + 16 + 5 &&
+                widePartial.compare(0, 231, wide, 0, 231) == 0 &&
+                widePartial[231] == '~',
+            "a long name should be cut between its characters");
+}
+
 OPENSCP_TEST(test_harness_names_the_failing_case, t) {
     // A failure names its case, which the harness can then run on its own.
     openscp::test::TestContext example;

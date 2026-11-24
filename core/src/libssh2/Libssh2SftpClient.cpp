@@ -3507,7 +3507,7 @@ bool Libssh2SftpClient::get(
     apply_transfer_socket_timeouts(sock_);
 
     const TransferIntegrityPolicy policy = transferIntegrityPolicy_;
-    const std::string localPart = local + ".part";
+    const std::string localPart = partialPathFor(local);
 
     // Open first and read the size from the handle: this saves the round trip
     // of a separate stat, and the attributes describe the file actually read.
@@ -3728,7 +3728,7 @@ bool Libssh2SftpClient::put(
     apply_transfer_socket_timeouts(sock_);
 
     const TransferIntegrityPolicy policy = transferIntegrityPolicy_;
-    const std::string remotePart = remote + ".part";
+    const std::string remotePart = partialPathFor(remote);
 
     // Open local for reading
     UniqueFile localFile(openLocalFile(local, "rb"));
