@@ -4735,6 +4735,25 @@ OPENSCP_TEST(testRemovingUploadCanQueueRemotePartialCleanup, test) {
                "remote cleanup should target the deterministic .part path");
 }
 
+OPENSCP_TEST(testRemovingUploadsQueuesTheirCleanupsAtOnce, test) {
+    TransferManager manager;
+    TransferBatchOptions batch;
+    batch.sessionKey = QStringLiteral("test-session");
+    QVector<quint64> uploads;
+    for (int index = 0; index < 3; ++index) {
+        uploads.push_back(manager.enqueueUpload(
+            QStringLiteral("/local/upload-%1").arg(index),
+            QStringLiteral("/remote/upload-%1").arg(index), batch));
+    }
+    int addedNotifications = 0;
+    QObject::connect(&manager, &TransferManager::tasksAdded, &manager,
+                     [&](const QVector<quint64> &) { ++addedNotifications; });
+    manager.removeTasks(uploads, true);
+    test.check(manager.tasksSnapshot().size() == 3 && addedNotifications == 1,
+               "the cleanups of removed uploads should be queued as one "
+               "addition, not one per upload");
+}
+
 OPENSCP_TEST(testRemovingDownloadKeepsAnotherDownloadsPartial, test) {
     QTemporaryDir root;
     const QString destination = root.filePath("shared.dat");

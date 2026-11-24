@@ -1841,6 +1841,10 @@ void TransferManager::removeTasks(const QVector<quint64> &taskIds,
     publishRemoved(removedIds);
     if (!removePartialData)
         return;
+    // Remote cleanup must stay off the UI thread. Represent it as normal
+    // persistent queue operations so each can wait for the matching session,
+    // queued together so that thousands of uploads are one addition.
+    QVector<TransferRequest> cleanups;
     for (const auto &taskNode : removed) {
         const TransferTask &task = *taskNode;
         if (task.type != TransferTask::Type::Upload ||
@@ -1850,14 +1854,17 @@ void TransferManager::removeTasks(const QVector<quint64> &taskIds,
                                          task.dst)) {
             continue;
         }
-        // Remote cleanup must stay off the UI thread. Represent it as a normal
-        // persistent queue operation so it can wait for the matching session.
         TransferBatchOptions cleanup;
         cleanup.batchId = task.batchId;
         cleanup.sessionKey = task.sessionKey;
         cleanup.conflictPolicy = Policy::Skip;
-        enqueueRemoteDelete(task.dst + QStringLiteral(".part"), false, cleanup);
+        cleanups.push_back({TransferTask::Type::DeleteRemoteFile,
+                            {},
+                            task.dst + QStringLiteral(".part"),
+                            cleanup,
+                            -1});
     }
+    enqueueTasks(cleanups);
 }
 
 void TransferManager::removeInactiveTasks(

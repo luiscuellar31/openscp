@@ -259,7 +259,8 @@ server, from `downloadOriginUrl`, and the security zone that Internet Options
 give it. `enqueueTasks` adds many tasks under one lock
 with one `tasksAdded` signal and one worker wake-up; a request can depend on an
 earlier request of the same call. Synchronization plans, local discovery
-batches and remote prescan batches enter the queue through it. Before dispatching a download or upload, it
+batches, remote prescan batches and the remote cleanups of removed uploads
+enter the queue through it. Before dispatching a download or upload, it
 reserves both the final destination and its deterministic `.part` path under
 the queue mutex; both remain reserved through publication and are released
 together. Conflict renaming checks and reserves the same pair. Local reservation
