@@ -1256,7 +1256,6 @@ void TransferManager::workerLoop(std::size_t slotIndex,
                 slot.client->clearInterrupt();
         }
         slot.activeTaskId.store(task->taskId);
-        publishUpdated({task->taskId});
         executeTask(slot, std::move(*task), stopToken);
         slot.activeTaskId.store(0);
     }
@@ -3241,14 +3240,22 @@ void TransferManager::restartPersistenceTimer() {
     }
     // Waiting for a pause in the changes, unless the deadline has passed and
     // the save that is already due should just happen.
-    if (now - persistencePendingSinceMs_ < kPersistenceDeadlineMs)
+    const qint64 deadlineMs = std::clamp<qint64>(
+        persistedTaskCount_, kPersistenceDeadlineMs, kPersistenceMaxDeadlineMs);
+    if (now - persistencePendingSinceMs_ < deadlineMs)
         persistenceTimer_->start();
 }
 
 void TransferManager::writeQueueSnapshot() {
     // The writer thread serializes and writes, so this only copies.
-    if (auto snapshot = persistedSnapshot(true))
-        persistenceWriter_.save(std::move(*snapshot));
+    auto snapshot = persistedSnapshot(true);
+    if (!snapshot)
+        return;
+    {
+        std::lock_guard<std::mutex> lock(persistenceMutex_);
+        persistedTaskCount_ = snapshot->size();
+    }
+    persistenceWriter_.save(std::move(*snapshot));
 }
 
 bool TransferManager::enablePersistence(const QString &path) {

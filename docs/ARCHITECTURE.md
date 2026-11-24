@@ -346,7 +346,10 @@ have narrower jobs:
   `TransferQueueWriter` reports a failed save once until a save succeeds. The
   manager tries a failed save again five seconds later, even when the queue
   has not changed since, with one retry waiting at a time and twice as long
-  after each failure in a row, up to five minutes.
+  after each failure in a row, up to five minutes. Each save rewrites the
+  whole queue, so a queue that keeps changing is saved at least every two
+  seconds, or every millisecond per saved task in a larger queue, up to 30
+  seconds; a queue that stops changing is saved 250 ms later.
 
 The transfer queue dialog keeps a separate table model indexed by task ID.
 Contiguous removals use Qt row-removal notifications. Discontinuous removals

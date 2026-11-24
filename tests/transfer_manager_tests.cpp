@@ -1451,6 +1451,60 @@ OPENSCP_TEST(testStatusChangesAloneDoNotRewriteTheQueue, test) {
                "removing a task should still be saved");
 }
 
+OPENSCP_TEST(testALargeQueueThatKeepsChangingIsSavedLessOften, test) {
+    // Each save rewrites the whole queue, so saving a queue of tens of
+    // thousands of tasks every two seconds wrote megabytes every second.
+    QTemporaryDir directory;
+    const QString path = directory.filePath(QStringLiteral("queue.json"));
+    TransferManager manager;
+    manager.setSessionIdentity(QStringLiteral("test-session"));
+    test.check(manager.enablePersistence(path),
+               "persistence should be enabled");
+    // Six seconds between saves.
+    constexpr int kTasks = 6000;
+    QVector<QPair<QString, QString>> downloads;
+    downloads.reserve(kTasks);
+    for (int index = 0; index < kTasks; ++index) {
+        downloads.push_back(
+            {QStringLiteral("/remote/file-%1").arg(index),
+             directory.filePath(QStringLiteral("file-%1").arg(index))});
+    }
+    manager.enqueueDownloads(downloads, testBatchOptions());
+    test.check(waitUntil(
+                   [&] {
+                       std::this_thread::sleep_for(
+                           std::chrono::milliseconds(100));
+                       return TransferQueuePersistence::load(
+                                  path, QStringLiteral("test-session"))
+                                  .tasks.size() == kTasks;
+                   },
+                   std::chrono::milliseconds(15000)),
+               "the queue should be saved");
+    const auto writtenAt = [&path] {
+        std::error_code error;
+        return std::filesystem::last_write_time(
+            QFile::encodeName(path).toStdString(), error);
+    };
+    const auto firstWrite = writtenAt();
+
+    // A speed limit is saved, so each one is a change that needs a save.
+    // They come every 25 ms, well within the 250 ms pause that would save the
+    // queue even with the larger deadline.
+    const quint64 changing = manager.tasksSnapshot().front().taskId;
+    const auto until =
+        std::chrono::steady_clock::now() + std::chrono::seconds(3);
+    bool rewritten = false;
+    for (int limit = 1; !rewritten && std::chrono::steady_clock::now() < until;
+         ++limit) {
+        manager.setTaskSpeedLimit(changing, limit);
+        rewritten = waitUntil([&] { return writtenAt() != firstWrite; },
+                              std::chrono::milliseconds(25));
+    }
+    test.check(!rewritten,
+               "a large queue that keeps changing should not be rewritten "
+               "every two seconds");
+}
+
 OPENSCP_TEST(testTasksTheTestsStartLookStartedByAWorker, test) {
     // The test access starts tasks through the scheduler's own transition,
     // so the tests never see a running task that production cannot make.

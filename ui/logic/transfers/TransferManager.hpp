@@ -172,9 +172,12 @@ class TransferManager : public QObject {
     static constexpr int kMaxTerminalHistory = 5000;
     static constexpr int kTerminalHistoryPruneBatch = kMaxTerminalHistory / 10;
     // A save waits for a pause in queue changes, but never longer than the
-    // deadline, so a busy queue is still saved regularly.
+    // deadline, so a busy queue is still saved regularly. Each save rewrites
+    // the whole queue, so the deadline grows by 1 ms per saved task above
+    // 2,000, up to kPersistenceMaxDeadlineMs.
     static constexpr int kPersistenceDelayMs = 250;
     static constexpr int kPersistenceDeadlineMs = 2000;
+    static constexpr int kPersistenceMaxDeadlineMs = 30000;
     // A failed save is tried again after kPersistenceRetryMs, twice as long
     // after each failure in a row, up to kPersistenceMaxRetryMs.
     static constexpr int kPersistenceRetryMs = 5000;
@@ -266,6 +269,9 @@ class TransferManager : public QObject {
     TransferQueueWriter persistenceWriter_;
     QString persistencePath_;
     qint64 persistencePendingSinceMs_ = 0;
+    // Tasks in the last snapshot handed to the writer; guarded by
+    // persistenceMutex_.
+    qsizetype persistedTaskCount_ = 0;
     // Fingerprint of the last snapshot handed to the writer; guarded by mtx_.
     std::optional<std::size_t> lastPersistedFingerprint_;
     bool persistenceEnabled_ = false;
