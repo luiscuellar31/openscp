@@ -245,11 +245,7 @@ void RemoteModel::setEntries(const QString &path,
         const QString name = QString::fromStdString(fileInfo.name);
         if (!showHidden_ && name.startsWith('.'))
             continue;
-        const bool isLink = (fileInfo.mode & 0120000u) == 0120000u;
-        nextItems.push_back(
-            {name, fileInfo.is_dir, isLink, fileInfo.size, fileInfo.has_size,
-             fileInfo.mtime, fileInfo.mode, fileInfo.uid, fileInfo.gid,
-             permissionText(fileInfo.is_dir, isLink, fileInfo.mode)});
+        nextItems.push_back(itemFor(name, fileInfo));
     }
     sortItemsVector(nextItems, sortColumn_, sortOrder_);
     beginResetModel();
@@ -258,6 +254,45 @@ void RemoteModel::setEntries(const QString &path,
     currentPath_ = normalizeRemotePath(path);
     endResetModel();
     emit rootPathLoaded(currentPath_, true, QString());
+}
+
+void RemoteModel::upsertEntry(const openscp::FileInfo &info) {
+    const QString name = QString::fromStdString(info.name);
+    if (loading_ || (!showHidden_ && name.startsWith('.')))
+        return;
+    Item item = itemFor(name, info);
+    const auto existing =
+        std::find_if(items_.begin(), items_.end(),
+                     [&name](const Item &entry) { return entry.name == name; });
+    if (existing != items_.end()) {
+        *existing = std::move(item);
+        const int row = static_cast<int>(existing - items_.begin());
+        emit dataChanged(index(row, 0), index(row, columnCount() - 1));
+    } else {
+        const int row = static_cast<int>(items_.size());
+        beginInsertRows({}, row, row);
+        items_.push_back(std::move(item));
+        endInsertRows();
+    }
+    sort(sortColumn_, sortOrder_);
+}
+
+RemoteModel::Item RemoteModel::itemFor(const QString &name,
+                                       const openscp::FileInfo &info) {
+    const bool isLink = (info.mode & 0120000u) == 0120000u;
+    return {name,          info.is_dir,
+            isLink,        info.size,
+            info.has_size, info.mtime,
+            info.mode,     info.uid,
+            info.gid,      permissionText(info.is_dir, isLink, info.mode)};
+}
+
+bool RemoteModel::hasEntry(const QString &name,
+                           Qt::CaseSensitivity sensitivity) const {
+    return std::any_of(items_.cbegin(), items_.cend(),
+                       [&name, sensitivity](const Item &entry) {
+                           return entry.name.compare(name, sensitivity) == 0;
+                       });
 }
 
 std::vector<std::size_t> RemoteModel::sortedRows(const std::vector<Item> &items,

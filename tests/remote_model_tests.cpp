@@ -166,6 +166,39 @@ OPENSCP_TEST(testSortingKeepsSelectionOnItsEntries, test) {
         "a descending sort should reverse ties too");
 }
 
+OPENSCP_TEST(testAnUploadedEntryTakesItsPlaceWithoutAListing, test) {
+    // An upload updates its own row instead of listing a large folder again.
+    RemoteModel model;
+    model.setEntries(QStringLiteral("/"),
+                     {entry("alpha", false, 30, true, 3, 0100644),
+                      entry("gamma", false, 20, true, 2, 0100644)});
+    QItemSelectionModel selection(&model);
+    const QModelIndex gamma = model.index(1, 0);
+    selection.select(gamma,
+                     QItemSelectionModel::Select | QItemSelectionModel::Rows);
+    selection.setCurrentIndex(gamma, QItemSelectionModel::NoUpdate);
+
+    model.upsertEntry(entry("beta", false, 10, true, 1, 0100644));
+    test.check(namesInRowOrder(model) ==
+                   QStringList({"alpha", "beta", "gamma"}),
+               "a new entry should take its place in the sort order");
+    const QModelIndexList selectedRows = selection.selectedRows();
+    test.check(
+        selectedRows.size() == 1 &&
+            model.nameAt(selectedRows.first()) == QStringLiteral("gamma") &&
+            model.nameAt(selection.currentIndex()) == QStringLiteral("gamma"),
+        "the selection should stay on its entry");
+
+    model.upsertEntry(entry("alpha", false, 99, true, 4, 0100644));
+    test.check(namesInRowOrder(model) ==
+                       QStringList({"alpha", "beta", "gamma"}) &&
+                   model.sizeAt(model.index(0, 0)) == 99,
+               "an entry by that name should be replaced, not added");
+    model.upsertEntry(entry(".hidden", false, 1, true, 5, 0100600));
+    test.check(model.rowCount() == 3 && model.hasEntry(QStringLiteral("beta")),
+               "a hidden entry should stay out while hidden entries do");
+}
+
 OPENSCP_TEST(testLargeListingsReusePrecomputedDisplayData, test) {
     RemoteModel model;
     std::vector<openscp::FileInfo> entries;

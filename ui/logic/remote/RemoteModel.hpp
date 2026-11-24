@@ -35,6 +35,11 @@ class RemoteModel : public QAbstractTableModel {
     void setLoading(const QString &path);
     void clearLoading();
     bool isLoading() const { return loading_; }
+    // Puts `info` in place of the entry with its name, or adds it, in sort
+    // order; the selection and the current row stay on their entries.
+    void upsertEntry(const openscp::FileInfo &info);
+    bool hasEntry(const QString &name,
+                  Qt::CaseSensitivity sensitivity = Qt::CaseSensitive) const;
 
     QString rootPath() const { return currentPath_; }
 
@@ -74,6 +79,7 @@ class RemoteModel : public QAbstractTableModel {
     Qt::SortOrder sortOrder_ = Qt::AscendingOrder;
 
     const Item *itemForIndex(const QModelIndex &index) const;
+    static Item itemFor(const QString &name, const openscp::FileInfo &info);
     QIcon iconForRemoteEntry(const Item &item) const;
     // Item rows in display order. Equal keys fall back to the name, so every
     // sort gives the same order.

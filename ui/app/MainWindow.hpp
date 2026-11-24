@@ -417,6 +417,11 @@ class MainWindow : public QMainWindow {
     std::shared_ptr<std::atomic<bool>> remoteScanCancelRequested_;
     std::atomic<bool> remoteScanInProgress_{false};
     QTimer *uploadRefreshTimer_ = nullptr;
+    // Uploads that finished in the visible remote folder since its last
+    // update, and whether one of them added a folder, which takes a listing.
+    QSet<QString> uploadedRemoteRows_;
+    bool uploadRefreshNeedsListing_ = false;
+    QSet<quint64> uploadStatJobs_;
     quint64 activeRemoteListJob_ = 0;
     // A refresh asked for while its folder was being listed, to run after it.
     bool remoteRefreshPending_ = false;

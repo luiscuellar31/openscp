@@ -151,7 +151,13 @@ worker call before starting work, so an interrupt that arrives between two of
 a job's calls still stops the next one. The main window does not replace a
 listing with a refresh of the same folder: the refresh runs once after it, and
 the view stays usable meanwhile, so uploads that keep finishing cannot keep
-every listing from showing.
+every listing from showing. Uploads update the visible folder a second after
+they stop finishing: one into the folder updates its row from a `stat`, and
+one into a folder it lists changes nothing it shows. The folder is listed
+again when an upload adds a folder to it, when more than 16 uploads finished
+in it together, or when one row cannot show the change: the upload's `.part`
+was listed, it replaced an entry spelled with other case, or the `stat` has
+no permissions, as with FTP servers without MLST.
 `RemoteTreeWalker` and `LocalTreeDiscovery` scan directories outside the UI
 thread and can be canceled. Deleting a remote folder removes the links inside
 it as entries and never follows them.

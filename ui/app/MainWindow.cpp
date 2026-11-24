@@ -10,6 +10,7 @@
 #include "logic/connections/SessionController.hpp"
 #include "logic/navigation/NavigationScope.hpp"
 #include "logic/navigation/PaneController.hpp"
+#include "logic/navigation/RemotePath.hpp"
 #include "logic/persistence/SecretStore.hpp"
 #include "logic/remote/RemoteActionController.hpp"
 #include "logic/remote/RemoteModel.hpp"
@@ -1070,6 +1071,40 @@ void MainWindow::initializeRuntimeState() {
         return selection;
     };
     remoteActionController_->setContext(std::move(remoteActionContext));
+    connect(remoteOps_, &RemoteOperationController::statCompleted, this,
+            [this](const RemoteOperationController::StatResult &result) {
+                if (!uploadStatJobs_.remove(result.result.job.id) ||
+                    !rightIsRemote_ || !rightRemoteModel_ ||
+                    rightRemoteModel_->isLoading()) {
+                    return;
+                }
+                const QString root = rightRemoteModel_->rootPath();
+                const QString name = result.path.section(QLatin1Char('/'), -1);
+                // The controller runs one job at a time, so a listing that
+                // is still to come started after the upload and shows it.
+                if (joinRemotePath(root, name) != result.path ||
+                    activeRemoteListJob_ != 0) {
+                    return;
+                }
+                // A listing replaces what one row cannot: the upload's
+                // partial file if it was listed, an entry it replaced under
+                // another case on a server that ignores case, and the
+                // permissions an FTP server without MLST leaves out of a stat.
+                const QString partialName =
+                    partialPathFor(result.path).section(QLatin1Char('/'), -1);
+                if (result.result.outcome !=
+                        RemoteOperationController::Outcome::Succeeded ||
+                    !result.found || (result.info.mode & 07777u) == 0 ||
+                    rightRemoteModel_->hasEntry(partialName) ||
+                    (!rightRemoteModel_->hasEntry(name) &&
+                     rightRemoteModel_->hasEntry(name, Qt::CaseInsensitive))) {
+                    requestRemoteListing(root, true);
+                    return;
+                }
+                openscp::FileInfo info = result.info;
+                info.name = name.toStdString();
+                rightRemoteModel_->upsertEntry(info);
+            });
     connect(
         remoteOps_, &RemoteOperationController::listCompleted, this,
         [this](const RemoteOperationController::ListResult &result) {
@@ -1206,14 +1241,29 @@ void MainWindow::initializeRuntimeState() {
     // A single cold snapshot seeds the delta-based UI observer at startup.
     transferUiController_.initialize(transferMgr_->tasksSnapshot());
     // Uploads in a batch finish close together, so the visible folder is
-    // refreshed once they stop finishing rather than after each one.
+    // updated once they stop finishing rather than after each one.
     uploadRefreshTimer_ = new QTimer(this);
     uploadRefreshTimer_->setSingleShot(true);
     uploadRefreshTimer_->setInterval(1000);
     connect(uploadRefreshTimer_, &QTimer::timeout, this, [this] {
-        if (!rightIsRemote_ || !rightRemoteModel_)
+        const QSet<QString> uploaded = std::exchange(uploadedRemoteRows_, {});
+        const bool needsListing =
+            std::exchange(uploadRefreshNeedsListing_, false);
+        if (!rightIsRemote_ || !rightRemoteModel_ || !remoteOps_)
             return;
-        requestRemoteListing(rightRemoteModel_->rootPath(), true);
+        // Looking up a few files costs less than listing a large folder
+        // again; many files cost more.
+        constexpr qsizetype kMostRowsToLookUp = 16;
+        if (needsListing || uploaded.size() > kMostRowsToLookUp) {
+            requestRemoteListing(rightRemoteModel_->rootPath(), true);
+            return;
+        }
+        for (const QString &path : uploaded) {
+            RemoteOperationController::StatRequest request;
+            request.path = path;
+            if (const auto job = remoteOps_->submit(request))
+                uploadStatJobs_.insert(job);
+        }
     });
     connect(transferMgr_, &TransferManager::tasksAdded, this,
             [this](const QVector<quint64> &ids) {
@@ -1680,14 +1730,24 @@ void MainWindow::handleTransferUiUpdate(const QVector<quint64> &upsertIds,
     const QVector<TransferTask> upserts =
         transferMgr_->tasksSnapshot(upsertIds);
     const openscpui::TransferUiUpdate update = transferUiController_.observe(
-        upserts, removedIds, rightIsRemote_ && rightRemoteModel_, remoteRoot);
+        upserts, removedIds, rightIsRemote_ && rightRemoteModel_, remoteRoot,
+        [this](const QString &name) {
+            // A hidden folder that the view hides needs no listing either.
+            return (!rightRemoteModel_->showHidden() &&
+                    name.startsWith(QLatin1Char('.'))) ||
+                   rightRemoteModel_->hasEntry(name);
+        });
     if (!update.completionMessage.isEmpty())
         statusBar()->showMessage(update.completionMessage, 5000);
     for (const QString &localPath : update.completedDownloadPathsToOpen) {
         openLocalPathWithPreference(localPath);
         statusBar()->showMessage(tr("Downloaded: ") + localPath, 5000);
     }
-    if (update.scheduleRemoteRefresh)
+    for (const QString &path : update.uploadsInRemoteRoot)
+        uploadedRemoteRows_.insert(path);
+    uploadRefreshNeedsListing_ =
+        uploadRefreshNeedsListing_ || update.scheduleRemoteRefresh;
+    if (update.scheduleRemoteRefresh || !update.uploadsInRemoteRoot.isEmpty())
         uploadRefreshTimer_->start();
 }
 
