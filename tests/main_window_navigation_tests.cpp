@@ -28,6 +28,8 @@
 #include <QItemSelectionModel>
 #include <QKeyEvent>
 #include <QKeySequence>
+#include <QLabel>
+#include <QMainWindow>
 #include <QMenu>
 #include <QMenuBar>
 #include <QMessageBox>
@@ -40,6 +42,7 @@
 #include <QStandardPaths>
 #include <QStatusBar>
 #include <QTemporaryDir>
+#include <QTextDocument>
 #include <QThreadPool>
 #include <QTimer>
 #include <QToolBar>
@@ -809,6 +812,27 @@ OPENSCP_TEST(testALocalCopyCanBeCanceledFromItsProgress, test) {
             .entryList(QDir::AllEntries | QDir::Hidden | QDir::NoDotAndDotDot)
             .isEmpty(),
         "a canceled copy should leave nothing at its destination");
+}
+
+OPENSCP_TEST(testKeptStagingFolderShowsAsItIsNamed, test) {
+    // The message is rich text for its link, so a staging folder named with
+    // "&" or "<" lost characters or turned into markup.
+    QMainWindow window;
+    auto *view = new DragAwareTreeView(&window);
+    window.setCentralWidget(view);
+    const QString folder =
+        QDir::tempPath() + QStringLiteral("/R&D <b>kept</b>");
+    view->showKeepMessage(folder);
+    QString shown;
+    for (const QLabel *label : window.findChildren<QLabel *>()) {
+        QTextDocument document;
+        document.setHtml(label->text());
+        if (document.toPlainText().contains(QStringLiteral("R&D")))
+            shown = document.toPlainText();
+    }
+    test.check(shown.contains(folder),
+               "the message should show the folder as it is named: " +
+                   shown.toStdString());
 }
 
 // Exposes the drag that a mouse gesture would start.
