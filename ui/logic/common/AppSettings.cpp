@@ -6,6 +6,11 @@
 #include <QFileInfo>
 #include <QStandardPaths>
 
+#ifdef Q_OS_UNIX
+#include <fcntl.h>
+#include <unistd.h>
+#endif
+
 namespace openscpui {
 namespace {
 
@@ -37,6 +42,35 @@ QString statusError(QSettings::Status status) {
     }
     return QCoreApplication::translate(
         "AppSettings", "The settings file could not be synchronized.");
+}
+
+// QSettings writes a new file in place of the old one, with the old one's
+// mode, or with the umask's when there is none: a new file would be readable
+// by others until ensureOwnerOnly() restricts it. Created private first, it
+// never is.
+void createPrivateFileIfMissing(const QSettings &settings) {
+#ifdef Q_OS_UNIX
+    // The native format is that same INI file, except on macOS, where it is
+    // a property list that the system writes.
+#ifdef Q_OS_DARWIN
+    const bool iniFile = settings.format() == QSettings::IniFormat;
+#else
+    const bool iniFile = settings.format() == QSettings::IniFormat ||
+                         settings.format() == QSettings::NativeFormat;
+#endif
+    const QString path = settings.fileName();
+    if (!iniFile || path.isEmpty() || QFileInfo::exists(path) ||
+        settings.allKeys().isEmpty())
+        return;
+    QDir().mkpath(QFileInfo(path).absolutePath());
+    const int descriptor =
+        ::open(QFile::encodeName(path).constData(),
+               O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0600);
+    if (descriptor >= 0)
+        (void)::close(descriptor);
+#else
+    Q_UNUSED(settings);
+#endif
 }
 
 } // namespace
@@ -100,6 +134,7 @@ AppSettings::~AppSettings() {
 }
 
 SettingsSyncResult AppSettings::syncSecure() {
+    createPrivateFileIfMissing(*this);
     sync();
     if (status() != QSettings::NoError)
         return {false, statusError(status())};

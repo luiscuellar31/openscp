@@ -520,7 +520,10 @@ with the secrets that DPAPI encrypts for the user, are files under
 `%LOCALAPPDATA%`, which roaming profiles do not copy to other computers.
 `AppSettings` reads only the user's own file, without QSettings' fallback
 to organization-wide and machine-wide files: the machine-wide INI file
-would be under `C:\ProgramData`, which any user may write.
+would be under `C:\ProgramData`, which any user may write. On Linux and
+macOS it keeps each settings file private to its owner. An INI file, the
+format Linux uses, is created private before its first write; the property
+lists of macOS are written by the system.
 
 Use these classes instead of reading or writing their settings directly.
 `SettingsDialog` writes only the values the user changed, so every other

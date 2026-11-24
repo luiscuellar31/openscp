@@ -14,6 +14,17 @@
 
 namespace {
 
+// Secrets reach the store as SecureString, which wipes its memory; a QString
+// overload would invite passwords kept in strings that nothing wipes.
+template <typename Value>
+constexpr bool storesSecretsFrom =
+    requires(SecretStore store, const QString &key, const Value &value) {
+        store.setSecret(key, value);
+    };
+static_assert(storesSecretsFrom<openscp::SecureString>);
+static_assert(!storesSecretsFrom<QString>,
+              "secrets should never reach the store as a QString");
+
 struct FakeSecretBackend {
     QHash<QString, openscp::SecureString> values;
     SecretStore::PersistStatus saveStatus = SecretStore::PersistStatus::Stored;

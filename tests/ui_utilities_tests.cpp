@@ -18,6 +18,7 @@
 #include <QTemporaryDir>
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <filesystem>
 #include <initializer_list>
@@ -678,6 +679,59 @@ OPENSCP_TEST(testReadingSettingsLeavesTheirFileAlone, test) {
     file.refresh();
     test.check((file.permissions() & othersMayRead) == 0,
                "a settings file others can read should be made private again");
+}
+
+OPENSCP_TEST(testNewSettingsFilesAreNeverReadableByOthers, test) {
+    // QSettings writes through a temporary file that takes the mode of the
+    // file it replaces; for a new file, the umask's. Both were readable by
+    // others until the write ended, while another thread could look.
+    std::vector<QSettings::Format> formats = {QSettings::IniFormat};
+#ifndef Q_OS_DARWIN
+    // What the app uses outside Windows: the same INI file.
+    formats.push_back(QSettings::NativeFormat);
+#endif
+    QTemporaryDir folder;
+    for (const QSettings::Format format : formats) {
+        bool exposed = false;
+        for (int round = 0; round < 10 && !exposed; ++round) {
+            const QString directory =
+                folder.filePath(QStringLiteral("%1-%2")
+                                    .arg(static_cast<int>(format))
+                                    .arg(round));
+            const QString path = directory + QStringLiteral("/settings.ini");
+            test.check(QDir().mkpath(directory),
+                       "the settings folder should be created");
+            std::atomic<bool> writing{true};
+            std::atomic<bool> loose{false};
+            std::thread watcher([&] {
+                while (writing.load()) {
+                    for (const QFileInfo &entry : QDir(directory).entryInfoList(
+                             QDir::Files | QDir::Hidden)) {
+                        // QSettings' lock file holds no settings.
+                        if (entry.suffix() == QStringLiteral("lock"))
+                            continue;
+                        struct stat status {};
+                        if (::stat(
+                                QFile::encodeName(entry.filePath()).constData(),
+                                &status) == 0 &&
+                            (status.st_mode & 0077) != 0)
+                            loose = true;
+                    }
+                }
+            });
+            {
+                openscpui::AppSettings store(path, format);
+                store.setValue(QStringLiteral("key"), QStringLiteral("value"));
+            }
+            writing = false;
+            watcher.join();
+            exposed = loose.load();
+        }
+        test.check(!exposed,
+                   "a new settings file should never be readable by others, "
+                   "not even while it is first written (format " +
+                       std::to_string(static_cast<int>(format)) + ")");
+    }
 }
 #endif
 
