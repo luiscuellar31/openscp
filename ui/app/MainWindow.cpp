@@ -259,6 +259,22 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
                 },
                 Qt::QueuedConnection);
         });
+    // A label of its own, since the message that follows each save, as
+    // "Left: …" after a navigation, would replace a status message at once.
+    navigationStore_.setSaveFailureHandler([self](const QString &error) {
+        if (!self)
+            return;
+        auto *label = new QLabel(
+            tr("History and favorites could not be saved: %1").arg(error),
+            self->statusBar());
+        label->setTextFormat(Qt::PlainText);
+        self->statusBar()->addPermanentWidget(label, 0);
+        QTimer::singleShot(15000, label, [self, label] {
+            if (self)
+                self->statusBar()->removeWidget(label);
+            label->deleteLater();
+        });
+    });
     sessionController_ = new openscpui::SessionController(this);
     paneController_ = new openscpui::PaneController(this);
     const QString home = preferredLocalHomePath();

@@ -207,6 +207,7 @@ void NavigationStore::addRecentLocalPath(const QString &path) {
         settings->value(settingskeys::kRecentLocalPaths).toStringList();
     prependRecent(values, normalized);
     settings->setValue(settingskeys::kRecentLocalPaths, values);
+    finishSave(*settings);
 }
 
 void NavigationStore::addRecentRemotePath(const QString &scope,
@@ -219,6 +220,7 @@ void NavigationStore::addRecentRemotePath(const QString &scope,
     QStringList values = settings->value(key).toStringList();
     prependRecent(values, normalized);
     settings->setValue(key, values);
+    finishSave(*settings);
 }
 
 void NavigationStore::addRecentServer(const openscp::SessionOptions &session) {
@@ -230,6 +232,7 @@ void NavigationStore::addRecentServer(const openscp::SessionOptions &session) {
         settings->value(settingskeys::kRecentServers).toStringList();
     prependRecent(values, encoded);
     settings->setValue(settingskeys::kRecentServers, values);
+    finishSave(*settings);
 }
 
 QStringList NavigationStore::recentLocalPaths() const {
@@ -295,14 +298,18 @@ bool NavigationStore::toggleFavorite(Location location, const QString &path,
     if (!removed)
         values.prepend(normalized);
     settings->setValue(key, values);
+    finishSave(*settings);
     return !removed;
 }
 
 void NavigationStore::clearFavorites(Location location,
                                      const QString &remoteScope) {
     const QString key = favoritesKey(location, remoteScope);
-    if (!key.isEmpty())
-        createSettings()->remove(key);
+    if (key.isEmpty())
+        return;
+    auto settings = createSettings();
+    settings->remove(key);
+    finishSave(*settings);
 }
 
 void NavigationStore::clearAllHistory() {
@@ -311,9 +318,27 @@ void NavigationStore::clearAllHistory() {
     settings->remove(
         QString::fromLatin1(openscpui::settingskeys::kRemoteScopes));
     settings->remove(settingskeys::kRecentServers);
+    finishSave(*settings);
 }
 
-std::unique_ptr<QSettings> NavigationStore::createSettings() const {
+void NavigationStore::setSaveFailureHandler(
+    std::function<void(const QString &)> handler) {
+    onSaveFailure_ = std::move(handler);
+}
+
+void NavigationStore::finishSave(AppSettings &settings) {
+    const SettingsSyncResult result = settings.syncSecure();
+    if (result.ok) {
+        saveFailureReported_ = false;
+        return;
+    }
+    if (saveFailureReported_ || !onSaveFailure_)
+        return;
+    saveFailureReported_ = true;
+    onSaveFailure_(result.error);
+}
+
+std::unique_ptr<AppSettings> NavigationStore::createSettings() const {
     if (!settingsFile_.isEmpty()) {
         return std::make_unique<AppSettings>(settingsFile_, settingsFormat_);
     }

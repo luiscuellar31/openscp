@@ -3,6 +3,7 @@
 
 #include <QCoreApplication>
 #include <QDir>
+#include <QFile>
 #include <QTemporaryDir>
 
 namespace {
@@ -69,6 +70,45 @@ OPENSCP_TEST(testRecentHistory, test) {
     store.clearAllHistory();
     test.check(store.recentRemotePaths(QStringLiteral("server-a")).isEmpty(),
                "clearing history should include inactive remote scopes");
+}
+
+OPENSCP_TEST(testFailedSavesAreReportedOnceUntilOneWorks, test) {
+    // A path or favorite that could not be saved was dropped in silence and
+    // missing at the next start.
+    QTemporaryDir directory;
+    test.check(directory.isValid(),
+               "save failures should have a temporary settings directory");
+    if (!directory.isValid())
+        return;
+    const QString blocker = directory.filePath(QStringLiteral("blocker"));
+    const auto blockFolder = [&blocker] {
+        QFile file(blocker);
+        return file.open(QIODevice::WriteOnly);
+    };
+    test.check(blockFolder(), "a file should take the folder's place");
+    auto store = openscpui::NavigationStore::forIniFile(
+        QDir(blocker).filePath(QStringLiteral("navigation.ini")));
+    QStringList errors;
+    store.setSaveFailureHandler(
+        [&errors](const QString &error) { errors.push_back(error); });
+    using Location = openscpui::NavigationStore::Location;
+
+    store.addRecentLocalPath(directory.path());
+    (void)store.toggleFavorite(Location::Remote, QStringLiteral("/team"),
+                               QStringLiteral("server-a"));
+    test.check(errors.size() == 1 && !errors.front().isEmpty(),
+               "a failed save should be reported once while saves fail");
+
+    test.check(QFile::remove(blocker) && QDir().mkpath(blocker),
+               "the folder should become writable");
+    store.addRecentLocalPath(directory.path());
+    test.check(errors.size() == 1, "a save that works should report nothing");
+
+    test.check(QDir(blocker).removeRecursively() && blockFolder(),
+               "the folder should be blocked again");
+    store.addRecentLocalPath(directory.path());
+    test.check(errors.size() == 2,
+               "a failure after a save that worked should be reported again");
 }
 
 OPENSCP_TEST(testServerRoundTripDoesNotPersistSecrets, test) {

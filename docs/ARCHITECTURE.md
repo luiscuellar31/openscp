@@ -598,7 +598,8 @@ Path navigation is split by responsibility:
 - `OpenPathDialog` collects a typed path and exposes recent paths and favorites;
   it does not read settings or navigate by itself.
 - `MainWindow` selects the local or remote presentation, performs navigation,
-  and persists history and favorites through `NavigationStore`.
+  and persists history and favorites through `NavigationStore`, which reports
+  a save that fails once, until a save works again, so the window can say so.
 
 ## Adding a change
 

@@ -6,6 +6,7 @@
 #include <QString>
 #include <QStringList>
 
+#include <functional>
 #include <memory>
 
 namespace openscpui {
@@ -50,10 +51,16 @@ class NavigationStore {
     void clearFavorites(Location location, const QString &remoteScope = {});
     void clearAllHistory();
 
+    // Called with the error when history or favorites could not be saved,
+    // once until a save succeeds again, so that a settings file that cannot
+    // be written does not warn on every navigation.
+    void setSaveFailureHandler(std::function<void(const QString &)> handler);
+
     private:
     NavigationStore(QString settingsFile, AppSettings::Format format);
 
-    std::unique_ptr<QSettings> createSettings() const;
+    std::unique_ptr<AppSettings> createSettings() const;
+    void finishSave(AppSettings &settings);
     static QString historyKeyForScope(const QString &scope);
     static QString favoritesKey(Location location, const QString &remoteScope);
     static void prependRecent(QStringList &values, const QString &value);
@@ -62,6 +69,8 @@ class NavigationStore {
     QString application_;
     QString settingsFile_;
     AppSettings::Format settingsFormat_ = AppSettings::NativeFormat;
+    std::function<void(const QString &)> onSaveFailure_;
+    bool saveFailureReported_ = false;
 };
 
 } // namespace openscpui
