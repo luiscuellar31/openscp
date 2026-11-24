@@ -14,6 +14,7 @@
 #include <QItemSelectionModel>
 #include <QLabel>
 #include <QPersistentModelIndex>
+#include <QPushButton>
 #include <QSortFilterProxyModel>
 #include <QTableView>
 #include <QTextDocumentFragment>
@@ -35,6 +36,15 @@ QStringList destinations(const QAbstractItemModel *model) {
         result.push_back(
             model->index(row, kDestinationColumn).data().toString());
     return result;
+}
+
+QPushButton *pauseSelectedButton(const QWidget &dialog) {
+    for (auto *button : dialog.findChildren<QPushButton *>()) {
+        if (button->toolTip() ==
+            TransferQueueDialog::tr("Pause the selected transfers"))
+            return button;
+    }
+    return nullptr;
 }
 
 QString badgeText(const QWidget *dialog, const QString &objectName) {
@@ -251,6 +261,70 @@ OPENSCP_TEST(testSelectedActionsUseTaskSnapshots, test) {
                    canceledLast->status == TransferTask::Status::Canceled &&
                    stillUntouched->status != TransferTask::Status::Canceled,
                "cancel should affect only selected tasks");
+}
+
+OPENSCP_TEST(testSelectedActionsComeFromTheTable, test) {
+    // The summary runs with every batch of progress. It takes the selected
+    // tasks from the table, never from the queue under the lock its workers
+    // hold, so a change the table has not heard of yet does not show.
+    TransferManager manager;
+    const quint64 id = manager.enqueueRemoteDelete(
+        QStringLiteral("/selected"), false, TransferBatchOptions{});
+    TransferQueueDialog dialog(&manager);
+    dialog.show();
+    flushUiEvents();
+    auto *table =
+        dialog.findChild<QTableView *>(QStringLiteral("transferQueueTable"));
+    QPushButton *pauseSelected = pauseSelectedButton(dialog);
+    test.check(table && table->model()->rowCount() == 1 && pauseSelected &&
+                   !pauseSelected->isEnabled(),
+               "the queued task should show, with nothing selected yet");
+    if (!table || !pauseSelected || table->model()->rowCount() != 1)
+        return;
+
+    manager.blockSignals(true);
+    manager.pauseTask(id);
+    table->selectionModel()->select(table->model()->index(0, 0),
+                                    QItemSelectionModel::Select |
+                                        QItemSelectionModel::Rows);
+    const bool pausable = pauseSelected->isEnabled();
+    manager.blockSignals(false);
+    test.check(pausable, "the actions of a selected task should follow the "
+                         "table, which still shows it queued");
+}
+
+OPENSCP_TEST(testSelectedActionsFollowAFilterThatHidesTheSelection, test) {
+    // A filter that hides every selected row empties the selection without
+    // a selection signal, so the summary must not keep the old selection.
+    TransferManager manager;
+    manager.enqueueRemoteDelete(QStringLiteral("/queued"), false,
+                                TransferBatchOptions{});
+    TransferQueueDialog dialog(&manager);
+    dialog.show();
+    flushUiEvents();
+    auto *table =
+        dialog.findChild<QTableView *>(QStringLiteral("transferQueueTable"));
+    QPushButton *pauseSelected = pauseSelectedButton(dialog);
+    test.check(table && table->model()->rowCount() == 1 && pauseSelected,
+               "the queued task should show");
+    if (!table || !pauseSelected || table->model()->rowCount() != 1)
+        return;
+    table->selectionModel()->select(table->model()->index(0, 0),
+                                    QItemSelectionModel::Select |
+                                        QItemSelectionModel::Rows);
+    test.check(pauseSelected->isEnabled(),
+               "selecting a queued task should let it be paused");
+
+    constexpr int kCompletedFilter = 3;
+    test.check(QMetaObject::invokeMethod(&dialog, "onFilterChanged",
+                                         Q_ARG(int, kCompletedFilter)),
+               "the filter should be changeable");
+    flushUiEvents();
+    test.check(table->model()->rowCount() == 0 &&
+                   !table->selectionModel()->hasSelection() &&
+                   !pauseSelected->isEnabled(),
+               "with the selected task filtered out, nothing is selected "
+               "and its actions should be disabled");
 }
 
 OPENSCP_TEST(testDiscontinuousRemovalPreservesIndexesAndSelection, test) {

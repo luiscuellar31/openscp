@@ -341,7 +341,10 @@ O(R log R + N + P), with O(R + P) temporary storage; Qt proxy/view work is
 additional. No model reset is needed for either removal path. After each row
 change, the columns that fit their content measure only the rows on screen,
 and none while the dialog is hidden: closing it only hides it, and the queue
-keeps updating it.
+keeps updating it. The summary, refreshed with each batch of changes, reads
+the selection again only after it changes or loses rows, and takes the
+selected tasks' state from the table model, never from the queue under its
+lock.
 
 `SafeLocalFile` in the core owns local download publication and descriptor-based
 path operations for transfer tasks. The queue uses it to create or remove local
