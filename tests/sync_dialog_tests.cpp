@@ -286,5 +286,5 @@ int main(int argc, char **argv) {
         return 1;
     }
     openscp::test::TestHarness harness("Sync dialog");
-    return harness.run();
+    return harness.run(argc, argv);
 }

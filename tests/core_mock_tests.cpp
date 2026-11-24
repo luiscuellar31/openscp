@@ -42,6 +42,7 @@
 #include <iostream>
 #include <iterator>
 #include <optional>
+#include <sstream>
 #include <string>
 #include <thread>
 #include <type_traits>
@@ -2623,6 +2624,28 @@ OPENSCP_TEST(test_libssh2_recent_remote_modification, t) {
         "an out-of-range modification time should use the full check");
 }
 
+OPENSCP_TEST(test_harness_names_the_failing_case, t) {
+    // A failure names its case, which the harness can then run on its own.
+    openscp::test::TestContext example;
+    example.caseName = "test_example";
+    std::ostringstream output;
+    std::streambuf *const previous = std::cerr.rdbuf(output.rdbuf());
+    example.check(false, "it failed");
+    std::cerr.rdbuf(previous);
+    t.check(example.failures == 1 &&
+                output.str() == "[FAIL] test_example: it failed\n",
+            "a failure should name its case, got: " + output.str());
+
+    std::vector<std::string> unknown;
+    const auto cases = openscp::test::TestHarness::casesNamed(
+        {"test_harness_names_the_failing_case", "test_that_is_not_here"},
+        unknown);
+    t.check(cases.size() == 1 &&
+                cases.front()->name == "test_harness_names_the_failing_case" &&
+                unknown == std::vector<std::string>{"test_that_is_not_here"},
+            "the harness should pick the cases named and report the others");
+}
+
 OPENSCP_TEST(test_libssh2_jump_host_spawn, t) {
     openscp::Libssh2SftpClient c;
     openscp::SessionOptions opt = validOptions();
@@ -3316,7 +3339,7 @@ OPENSCP_TEST(test_unique_sftp_handle_lifecycle_and_leak_prevention, t) {
 
 } // namespace
 
-int main() {
+int main(int argc, char **argv) {
     openscp::test::TestHarness harness("core");
-    return harness.run();
+    return harness.run(argc, argv);
 }

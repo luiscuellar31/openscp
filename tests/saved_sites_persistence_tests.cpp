@@ -372,7 +372,7 @@ int main(int argc, char **argv) {
         return 1;
     }
     openscp::test::TestHarness harness("saved-sites persistence");
-    const int result = harness.run();
+    const int result = harness.run(argc, argv);
     QSettings().clear();
     return result;
 }

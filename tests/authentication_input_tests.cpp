@@ -111,5 +111,5 @@ int main(int argc, char **argv) {
     QApplication application(argc, argv);
     application.setQuitOnLastWindowClosed(false);
     openscp::test::TestHarness harness("authentication input");
-    return harness.run();
+    return harness.run(argc, argv);
 }

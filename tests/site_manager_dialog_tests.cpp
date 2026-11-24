@@ -373,7 +373,7 @@ int main(int argc, char **argv) {
     }
 
     openscp::test::TestHarness harness("Site Manager dialog");
-    const int result = harness.run();
+    const int result = harness.run(argc, argv);
     clearSavedSites();
     return result;
 }

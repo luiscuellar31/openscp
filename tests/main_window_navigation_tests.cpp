@@ -1308,7 +1308,7 @@ int main(int argc, char **argv) {
     }
     settingsRootPath = isolatedSettings.path();
     openscp::test::TestHarness harness("MainWindow navigation");
-    const int result = harness.run();
+    const int result = harness.run(argc, argv);
     openscp::testsupport::drainThreadPool();
     // Test mode keeps its own data folder, which is the test's to remove.
     (void)QDir(

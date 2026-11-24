@@ -90,6 +90,14 @@ Windows CI job runs. Changes to PowerShell scripts also need
 `scripts/ci/windows_clang_tidy.sh` from Git Bash, which runs the clang-tidy
 checks on the files with Windows code.
 
+Each test program prints a failure with the name of its case. Name one or
+more cases to run only those, or pass `--list` to print every name:
+
+```bash
+build-ci-local/tests/openscp_transfer_manager_tests --list
+build-ci-local/tests/openscp_transfer_manager_tests testMixedTaskBatchEnqueue
+```
+
 For documentation-only changes, check the links and run `git diff --check`;
 compiling the application is not needed to validate Markdown.
 

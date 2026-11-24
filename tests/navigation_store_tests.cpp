@@ -128,5 +128,5 @@ OPENSCP_TEST(testServerRoundTripDoesNotPersistSecrets, test) {
 int main(int argc, char **argv) {
     QCoreApplication application(argc, argv);
     openscp::test::TestHarness harness("navigation store");
-    return harness.run();
+    return harness.run(argc, argv);
 }

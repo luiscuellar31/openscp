@@ -1820,7 +1820,7 @@ OPENSCP_TEST(testCurlTransferLifecycle, test) {
 
 } // namespace
 
-int main() {
+int main(int argc, char **argv) {
     openscp::test::TestHarness harness("curl backend common");
-    return harness.run();
+    return harness.run(argc, argv);
 }

@@ -5594,5 +5594,5 @@ int main(int argc, char **argv) {
     QCoreApplication::setApplicationName(
         QStringLiteral("openscp-transfer-manager-tests"));
     openscp::test::TestHarness harness("transfer manager");
-    return harness.run();
+    return harness.run(argc, argv);
 }

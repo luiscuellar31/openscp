@@ -77,7 +77,7 @@ int main(int argc, char **argv) {
         return 1;
     }
     openscp::test::TestHarness harness("demo data");
-    const int result = harness.run();
+    const int result = harness.run(argc, argv);
     clearAll();
     return result;
 }

@@ -1739,7 +1739,7 @@ int main(int argc, char **argv) {
         return 1;
     }
     openscp::test::TestHarness harness("Accessible widgets");
-    const int result = harness.run();
+    const int result = harness.run(argc, argv);
     openscp::testsupport::drainThreadPool();
     return result;
 }

@@ -385,7 +385,7 @@ int main(int argc, char **argv) {
     }
 
     openscp::test::TestHarness harness("Connection dialog");
-    const int result = harness.run();
+    const int result = harness.run(argc, argv);
     clearSettings();
     openscp::testsupport::drainThreadPool();
     return result;

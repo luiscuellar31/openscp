@@ -598,7 +598,7 @@ OPENSCP_TEST(testWebDavXmlPreflightLeavesValidationToTinyXml, test) {
 
 } // namespace
 
-int main() {
+int main(int argc, char **argv) {
     openscp::test::TestHarness harness("curl listing parser");
-    return harness.run();
+    return harness.run(argc, argv);
 }

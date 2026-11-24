@@ -244,5 +244,5 @@ int main(int argc, char **argv) {
         return 1;
     }
     openscp::test::TestHarness harness("site credential repository");
-    return harness.run();
+    return harness.run(argc, argv);
 }
