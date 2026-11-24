@@ -16,6 +16,7 @@
 #include <QFileInfo>
 #include <QMenu>
 #include <QMessageBox>
+#include <QProgressDialog>
 #include <QPushButton>
 #include <QStatusBar>
 #include <QThreadPool>
@@ -49,6 +50,27 @@ QString buildLocalFsSummaryMessage(bool deleteSource, int successCount,
                                                "Copied: %1  |  Failed: %2"))
         .arg(successCount)
         .arg(failureCount);
+}
+
+// The progress of a local operation on `items` entries. It shows once the
+// operation has taken a second, so a short one never flashes it, and its
+// Cancel sets `canceled`.
+QProgressDialog *
+createLocalFsProgress(QWidget *parent, const QString &label, qsizetype items,
+                      const std::shared_ptr<std::atomic_bool> &canceled) {
+    auto *progress = new QProgressDialog(
+        label, QCoreApplication::translate("MainWindow", "Cancel"), 0,
+        items > 1 ? static_cast<int>(items) : 0, parent);
+    progress->setObjectName(QStringLiteral("localOperationProgress"));
+    progress->setWindowModality(Qt::NonModal);
+    progress->setAutoClose(false);
+    progress->setAutoReset(false);
+    progress->setMinimumDuration(1000);
+    // Starts the wait; without a value the dialog never shows by itself.
+    progress->setValue(0);
+    QObject::connect(progress, &QProgressDialog::canceled, progress,
+                     [canceled] { canceled->store(true); });
+    return progress;
 }
 
 } // namespace
@@ -150,21 +172,48 @@ void MainWindow::runLocalFsOperation(
     }
 
     ++localFsJobsInFlight_;
-    statusBar()->showMessage(deleteSource ? tr("Moving selected items...")
-                                          : tr("Copying selected items..."),
-                             1500);
+    const QString label = deleteSource ? tr("Moving selected items...")
+                                       : tr("Copying selected items...");
+    statusBar()->showMessage(label, 1500);
+
+    // Canceling stops before the next entry; a file being copied finishes
+    // first.
+    auto operationCanceled = std::make_shared<std::atomic_bool>(false);
+    const QPointer<QProgressDialog> progressDialog(
+        createLocalFsProgress(this, label, pairs.size(), operationCanceled));
 
     QPointer<MainWindow> self(this);
     localFsPool_.start([self, pairs, deleteSource, skippedCount, onFinished,
+                        label, progressDialog, operationCanceled,
                         canceled = localFsCanceled_]() {
         int successCount = 0;
         int failureCount = 0;
         QString lastError;
-        const auto shouldCancel = [canceled] { return canceled->load(); };
+        const auto shouldCancel = [canceled, operationCanceled] {
+            return canceled->load() || operationCanceled->load();
+        };
 
-        for (const auto &pair : pairs) {
-            if (shouldCancel())
+        bool wasCanceled = false;
+        for (qsizetype index = 0; index < pairs.size(); ++index) {
+            if (shouldCancel()) {
+                wasCanceled = true;
                 break;
+            }
+            const LocalFsPair &pair = pairs[index];
+            if (QObject *const app = QCoreApplication::instance()) {
+                QMetaObject::invokeMethod(
+                    app,
+                    [progressDialog, index,
+                     text = label + QLatin1Char('\n') +
+                            QFileInfo(pair.sourcePath).fileName()] {
+                        if (!progressDialog)
+                            return;
+                        progressDialog->setLabelText(text);
+                        if (progressDialog->maximum() > 0)
+                            progressDialog->setValue(static_cast<int>(index));
+                    },
+                    Qt::QueuedConnection);
+            }
             QString operationError;
             const bool succeeded =
                 deleteSource ? moveLocalEntry(pair.sourcePath, pair.targetPath,
@@ -173,6 +222,10 @@ void MainWindow::runLocalFsOperation(
                                               operationError, shouldCancel);
             if (succeeded) {
                 ++successCount;
+            } else if (shouldCancel()) {
+                // A canceled entry is left as it was, not failed.
+                wasCanceled = true;
+                break;
             } else {
                 ++failureCount;
                 lastError = operationError;
@@ -185,13 +238,15 @@ void MainWindow::runLocalFsOperation(
         QMetaObject::invokeMethod(
             app,
             [self, successCount, failureCount, skippedCount, lastError,
-             deleteSource, onFinished]() {
+             deleteSource, onFinished, progressDialog, wasCanceled]() {
+                if (progressDialog)
+                    progressDialog->deleteLater();
                 if (!self)
                     return;
 
                 --self->localFsJobsInFlight_;
                 if (onFinished)
-                    onFinished(failureCount == 0);
+                    onFinished(failureCount == 0 && !wasCanceled);
 
                 // Refreshing the panels shows their paths, so the result,
                 // with its errors, comes after.
@@ -203,6 +258,11 @@ void MainWindow::runLocalFsOperation(
 
                 QString statusMessage = buildLocalFsSummaryMessage(
                     deleteSource, successCount, failureCount, skippedCount);
+                if (wasCanceled) {
+                    statusMessage +=
+                        QStringLiteral("  |  ") +
+                        QCoreApplication::translate("MainWindow", "Canceled");
+                }
                 if (failureCount > 0 && !lastError.isEmpty()) {
                     statusMessage += "\n" +
                                      QCoreApplication::translate(

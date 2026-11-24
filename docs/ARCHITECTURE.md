@@ -443,7 +443,9 @@ application, such as e-mail attachments, are refused.
 Copies, moves and deletions between local folders run on a pool of two
 threads that `MainWindow` owns, apart from the global pool the connection and
 the disconnect cleanup use. They stop at the next entry when canceled,
-removing what they staged; closing the window while one runs asks first.
+removing what they staged; closing the window while one runs asks first. A
+copy or move that takes more than a second shows its progress, whose Cancel
+stops it the same way; a file being copied finishes first.
 Closing stops nothing before the window is sure to close: connected, it
 disconnects first, where the user may still choose to stay connected, and asks
 about the local copies once the disconnect ends. A

@@ -33,6 +33,7 @@
 #include <QMessageBox>
 #include <QMimeData>
 #include <QMouseEvent>
+#include <QProgressDialog>
 #include <QPushButton>
 #include <QSplitter>
 #include <QSplitterHandle>
@@ -719,6 +720,95 @@ OPENSCP_TEST(testLocalCopyResultStaysInTheStatusBar, test) {
     test.check(message().startsWith(QStringLiteral("Copied: 1")),
                "the copy's result should stay in the status bar: " +
                    message().toStdString());
+}
+
+OPENSCP_TEST(testALocalCopyCanBeCanceledFromItsProgress, test) {
+    // A long local copy showed no progress, and only closing the window
+    // could stop it.
+    QTemporaryDir temporary;
+    test.check(temporary.isValid(), "the local copy needs a folder");
+    if (!temporary.isValid())
+        return;
+    configureMainWindowSettings(settingsRootPath);
+    const QDir root(temporary.path());
+    const QString right = root.filePath(QStringLiteral("right"));
+    const QString source = root.filePath(QStringLiteral("tree"));
+    test.check(QDir().mkpath(root.filePath(QStringLiteral("left"))) &&
+                   QDir().mkpath(right) && QDir().mkpath(source),
+               "the copy needs its folders");
+    // Enough files that the copy is still running when it is canceled.
+    for (int index = 0; index < 2000; ++index) {
+        QFile file(
+            QDir(source).filePath(QStringLiteral("file-%1.txt").arg(index)));
+        if (!file.open(QIODevice::WriteOnly) || file.write("data") != 4) {
+            test.check(false, "the copy needs its files");
+            return;
+        }
+    }
+
+    MainWindow window;
+    window.show();
+    flushUiEvents();
+    const MainWindowFocusParts parts = focusParts(window);
+    test.check(parts.leftPath && parts.rightPath && parts.rightView,
+               "the copy needs both local panels");
+    if (!parts.leftPath || !parts.rightPath || !parts.rightView)
+        return;
+    parts.leftPath->pathRequested(root.filePath(QStringLiteral("left")));
+    parts.rightPath->pathRequested(right);
+    flushUiEvents();
+
+    QMimeData mime;
+    mime.setUrls({QUrl::fromLocalFile(source)});
+    QDropEvent drop(QPointF(10, 10), Qt::CopyAction, &mime, Qt::LeftButton,
+                    Qt::NoModifier);
+    static_cast<QObject &>(window).eventFilter(parts.rightView->viewport(),
+                                               &drop);
+    // The copy starts once the drop is over.
+    QProgressDialog *progress = nullptr;
+    (void)openscp::testsupport::waitUntil(
+        [&] {
+            progress = window.findChild<QProgressDialog *>(
+                QStringLiteral("localOperationProgress"));
+            return progress != nullptr;
+        },
+        std::chrono::milliseconds(3000));
+    auto *cancel = progress ? progress->findChild<QPushButton *>() : nullptr;
+    test.check(cancel != nullptr, "a local copy should show its progress");
+    if (!cancel)
+        return;
+    // Canceled once it has staged some files, the copy stops in the middle
+    // of its entry.
+    const auto copying = [&right] {
+        const QFileInfoList staged = QDir(right).entryInfoList(
+            {QStringLiteral(".openscp-stage-*")},
+            QDir::Dirs | QDir::Hidden | QDir::NoDotAndDotDot);
+        return !staged.isEmpty() &&
+               !QDir(staged.front().filePath()).isEmpty(QDir::Files);
+    };
+    test.check(openscp::testsupport::waitUntil(copying,
+                                               std::chrono::milliseconds(5000)),
+               "the copy should start staging its files");
+    cancel->click();
+    const auto message = [&] { return window.statusBar()->currentMessage(); };
+    test.check(openscp::testsupport::waitUntil(
+                   [&] {
+                       return message().startsWith(QStringLiteral("Copied")) ||
+                              message().startsWith(QStringLiteral("Right: "));
+                   },
+                   std::chrono::milliseconds(10000)),
+               "the copy should stop");
+    flushUiEvents();
+    test.check(message().contains(QStringLiteral("Failed: 0")) &&
+                   message().contains(QStringLiteral("Canceled")),
+               "the result should say that the copy was canceled, not that it "
+               "failed: " +
+                   message().toStdString());
+    test.check(
+        QDir(right)
+            .entryList(QDir::AllEntries | QDir::Hidden | QDir::NoDotAndDotDot)
+            .isEmpty(),
+        "a canceled copy should leave nothing at its destination");
 }
 
 // Exposes the drag that a mouse gesture would start.
