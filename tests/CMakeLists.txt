@@ -145,6 +145,22 @@ openscp_add_test(openscp_ui_utilities_tests
     SOURCES ui_utilities_tests.cpp
     LINK_LIBRARIES openscp_ui_logic
 )
+# The catalogs, so that a test can check what each language shows.
+qt_add_translation(OPENSCP_TEST_QM_FILES
+    ${CMAKE_SOURCE_DIR}/translations/openscp_de.ts
+    ${CMAKE_SOURCE_DIR}/translations/openscp_en.ts
+    ${CMAKE_SOURCE_DIR}/translations/openscp_es.ts
+    ${CMAKE_SOURCE_DIR}/translations/openscp_fr.ts
+    ${CMAKE_SOURCE_DIR}/translations/openscp_pt.ts
+)
+foreach(qm ${OPENSCP_TEST_QM_FILES})
+    get_filename_component(_qm_name "${qm}" NAME)
+    set_source_files_properties(${qm} PROPERTIES QT_RESOURCE_ALIAS "${_qm_name}")
+endforeach()
+qt_add_resources(openscp_ui_utilities_tests test_i18n
+    PREFIX "/i18n"
+    FILES ${OPENSCP_TEST_QM_FILES}
+)
 
 # Only demo builds compile the sample data into the application.
 openscp_add_test(openscp_demo_data_tests

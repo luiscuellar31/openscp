@@ -52,14 +52,13 @@ int main(int argc, char *argv[]) {
         QDir(QCoreApplication::applicationDirPath()).absolutePath();
     const QString resourceTranslationPath =
         ":/i18n/" + translationBaseName + ".qm";
-    // English is the source language: no app translator is needed for "en".
-    if (languageCode != QStringLiteral("en")) {
-        if (QFile::exists(resourceTranslationPath)
-                ? translator.load(resourceTranslationPath)
-                : (translator.load(translationBaseName, transDir1) ||
-                   translator.load(translationBaseName, transDir2))) {
-            app.installTranslator(&translator);
-        }
+    // English is the source language; its catalog holds only the forms that
+    // depend on a count, such as "1 file" and "2 files".
+    if (QFile::exists(resourceTranslationPath)
+            ? translator.load(resourceTranslationPath)
+            : (translator.load(translationBaseName, transDir1) ||
+               translator.load(translationBaseName, transDir2))) {
+        app.installTranslator(&translator);
     }
     static QTranslator qtTranslator;
     const QString qtBaseName = QString("qtbase_%1").arg(languageCode);

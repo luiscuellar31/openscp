@@ -5,6 +5,7 @@
 #include "logic/common/MainWindowSharedUtils.hpp"
 #include "logic/common/StagingStore.hpp"
 #include "logic/common/UiAlerts.hpp"
+#include "logic/common/UiFormatters.hpp"
 #include "logic/remote/RemoteModel.hpp"
 #include "logic/remote/RemoteOperationController.hpp"
 #include "logic/transfers/TransferManager.hpp"
@@ -499,9 +500,8 @@ bool DragAwareTreeView::confirmRemoteDragThreshold(
                              static_cast<qint64>(stats.totalBytes), 1,
                              QLocale::DataSizeIecFormat));
     }
-    box.setText(tr("You are about to prepare %1 items%2. Continue?")
-                    .arg(QLocale().toString(static_cast<qulonglong>(
-                        stats.totalItems + stats.totalDirs)))
+    box.setText(tr("You are about to prepare %Ln items%1. Continue?", nullptr,
+                   pluralCount(stats.totalItems + stats.totalDirs))
                     .arg(sizePart));
     auto *yesButton = box.addButton(tr("Continue"), QMessageBox::AcceptRole);
     box.addButton(tr("Cancel"), QMessageBox::RejectRole);
@@ -966,9 +966,9 @@ void DragAwareTreeView::finishRemoteDragStaging(
 
     if (state->failed > 0) {
         const QString prefix =
-            tr("%1 of %2 staging operations failed. Files kept at:")
-                .arg(state->failed)
-                .arg(total);
+            tr("%1 of %n staging operations failed. Files kept at:", nullptr,
+               total)
+                .arg(state->failed);
         showKeepMessageWithPrefix(prefix, currentBatchDir_);
         finishBatch(QStringLiteral("partial-fail"), state->failed);
         return;

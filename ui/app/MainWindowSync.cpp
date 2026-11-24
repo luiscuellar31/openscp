@@ -1,5 +1,6 @@
 #include "app/MainWindow.hpp"
 #include "logic/common/UiAlerts.hpp"
+#include "logic/common/UiFormatters.hpp"
 #include "logic/connections/SessionController.hpp"
 #include "logic/remote/RemoteModel.hpp"
 #include "logic/remote/RemoteOperationController.hpp"
@@ -58,9 +59,9 @@ void MainWindow::initializeSyncCoordinator() {
             if (!syncProgress_)
                 return;
             syncProgress_->setLabelText(
-                tr("Comparing folders… %1 items, %2\n%3")
-                    .arg(QLocale().toString(items),
-                         QLocale().formattedDataSize(
+                tr("Comparing folders… %Ln items, %1\n%2", nullptr,
+                   pluralCount(items))
+                    .arg(QLocale().formattedDataSize(
                              static_cast<qint64>(std::min<quint64>(
                                  bytes,
                                  quint64(std::numeric_limits<qint64>::max())))),
@@ -158,8 +159,9 @@ void MainWindow::onSyncPreparationReady(const SyncPreparationResult &prepared) {
             tr("No synchronization operations were selected"), 4000);
         return;
     }
-    statusBar()->showMessage(
-        tr("Queued %1 synchronization operations").arg(taskCount), 6000);
+    statusBar()->showMessage(tr("Queued %n synchronization operations", nullptr,
+                                pluralCount(taskCount)),
+                             6000);
     maybeShowTransferQueue();
 }
 

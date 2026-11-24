@@ -268,8 +268,7 @@ void MainWindow::rightItemActivated(const QModelIndex &idx) {
         // Enqueue download so it appears in the queue (instead of direct
         // download)
         taskId = transferMgr_->enqueueDownload(remotePath, localPath);
-        statusBar()->showMessage(QString(tr("Queued: %1 downloads")).arg(1),
-                                 3000);
+        statusBar()->showMessage(tr("Queued: %n downloads", nullptr, 1), 3000);
         maybeShowTransferQueue();
     } else {
         // There was already an identical task in the queue; optionally show it
@@ -331,8 +330,7 @@ void MainWindow::downloadRightToLeft() {
             return;
         }
         transferMgr_->enqueueDownload(remotePath, dst.filePath(name));
-        statusBar()->showMessage(QString(tr("Queued: %1 downloads")).arg(1),
-                                 4000);
+        statusBar()->showMessage(tr("Queued: %n downloads", nullptr, 1), 4000);
         maybeShowTransferQueue();
         const qsizetype slash = remotePath.lastIndexOf('/');
         const QString parent =
@@ -510,7 +508,7 @@ void MainWindow::uploadViaDialog() {
         }
         if (enqueuedCount > 0) {
             statusBar()->showMessage(
-                QString(tr("Queued: %1 uploads")).arg(enqueuedCount), 4000);
+                tr("Queued: %n uploads", nullptr, enqueuedCount), 4000);
             maybeShowTransferQueue();
         }
         return;

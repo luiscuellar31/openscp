@@ -1281,8 +1281,8 @@ void TransferQueueDialog::onLimitSelected() {
 
     bool inputAccepted = false;
     const int speedLimitKbps = QInputDialog::getInt(
-        this, tr("Limit for task(s)"), tr("KB/s (0 = no limit)"), 0, 0,
-        1'000'000, 1, &inputAccepted);
+        this, tr("Limit for %n tasks", nullptr, pluralCount(eligible.size())),
+        tr("KB/s (0 = no limit)"), 0, 0, 1'000'000, 1, &inputAccepted);
     if (!inputAccepted)
         return;
     for (quint64 taskId : eligible)

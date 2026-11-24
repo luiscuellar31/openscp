@@ -192,7 +192,10 @@ suppression needs a documented compatibility reason or false positive.
 
 English strings live in the C++ sources. Spanish, Portuguese, French, and German
 Qt Linguist catalogs under `translations/` are tracked; generated `.qm` files
-are not.
+are not. A message with a count passes the count to `tr()` and writes `%n`, or
+`%Ln` for a number in the reader's format, so that each language picks its
+form, as in `tr("Queued: %n downloads", nullptr, count)`. English then needs
+its own catalog, `openscp_en.ts`, which holds only those messages.
 
 Use `lupdate` and `lrelease` from the same Qt 6 installation used for the build:
 
@@ -217,6 +220,15 @@ repository root:
   translations/openscp_es.ts \
   translations/openscp_fr.ts \
   translations/openscp_pt.ts
+"$QT_TOOLS_DIR/lupdate" \
+  -recursive \
+  -extensions cpp,hpp \
+  -locations absolute \
+  -source-language en \
+  -target-language en \
+  -pluralonly \
+  ui \
+  -ts translations/openscp_en.ts
 ```
 
 Review the diff in context. Preserve `%1`, `%2`, `%n`, newlines, rich-text tags,
@@ -228,7 +240,7 @@ rg -n 'type="unfinished"' translations
 rg -n 'type="(vanished|obsolete)"' translations
 
 mkdir -p build/translations-check
-for locale in de es fr pt; do
+for locale in de en es fr pt; do
   "$QT_TOOLS_DIR/lrelease" -nounfinished \
     "translations/openscp_${locale}.ts" \
     -qm "build/translations-check/openscp_${locale}.qm"

@@ -16,6 +16,7 @@
 #include <QSettings>
 #include <QStandardPaths>
 #include <QTemporaryDir>
+#include <QTranslator>
 
 #include <algorithm>
 #include <atomic>
@@ -25,6 +26,7 @@
 #include <string>
 #include <system_error>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #ifndef _WIN32
@@ -734,6 +736,36 @@ OPENSCP_TEST(testNewSettingsFilesAreNeverReadableByOthers, test) {
     }
 }
 #endif
+
+OPENSCP_TEST(testCountsTakeTheirPluralForms, test) {
+    // A count picks its form in every language, English too: the status bar
+    // said "Queued: 1 downloads".
+    const std::vector<std::pair<const char *, const char *>> messages = {
+        {"MainWindow", "Queued: %n downloads"},
+        {"SyncCoordinator", "%n folders could not be read."},
+        {"SyncDialog", "%n conflicts"}};
+    for (const char *language : {"de", "en", "es", "fr", "pt"}) {
+        QTranslator translator;
+        const QString catalog =
+            QStringLiteral(":/i18n/openscp_%1.qm").arg(QLatin1String(language));
+        test.check(translator.load(catalog),
+                   "the catalog should load: " + catalog.toStdString());
+        QCoreApplication::installTranslator(&translator);
+        for (const auto &[context, source] : messages) {
+            const QString one =
+                QCoreApplication::translate(context, source, nullptr, 1);
+            const QString two =
+                QCoreApplication::translate(context, source, nullptr, 2);
+            test.check(
+                QString(one).replace(QLatin1Char('1'), QLatin1Char('#')) !=
+                    QString(two).replace(QLatin1Char('2'), QLatin1Char('#')),
+                std::string(language) + " should not say one and two " +
+                    "the same way: " + one.toStdString() + " / " +
+                    two.toStdString());
+        }
+        QCoreApplication::removeTranslator(&translator);
+    }
+}
 
 OPENSCP_TEST(testLocalEntryNamesFollowThisComputer, test) {
     test.check(isValidLocalEntryName(QStringLiteral("report.txt")),

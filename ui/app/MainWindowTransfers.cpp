@@ -4,6 +4,7 @@
 #include "logic/common/MainWindowSharedUtils.hpp"
 #include "logic/common/StagingStore.hpp"
 #include "logic/common/UiAlerts.hpp"
+#include "logic/common/UiFormatters.hpp"
 #include "logic/connections/SessionController.hpp"
 #include "logic/remote/LocalTreeDiscovery.hpp"
 #include "logic/remote/RemoteModel.hpp"
@@ -162,7 +163,7 @@ void MainWindow::runRemoteDownloadPrescan(
             queuedPairs.push_back({seed.remotePath, seed.localPath});
         const int enqueuedCount =
             transferMgr_->enqueueDownloads(queuedPairs, batchOptions);
-        QString message = tr("Queued: %1 downloads").arg(enqueuedCount);
+        QString message = tr("Queued: %n downloads", nullptr, enqueuedCount);
         if (initialSkipped > 0) {
             message += QStringLiteral("  |  ") +
                        tr("Skipped invalid: %1").arg(initialSkipped);
@@ -246,10 +247,12 @@ void MainWindow::runRemoteDownloadPrescan(
                 if (state->canceled && !state->moveSources) {
                     statusBar()->showMessage(tr("Remote scan canceled"), 4000);
                 } else {
-                    QString message = state->moveSources
-                                          ? tr("Queued: %1 downloads (move)")
-                                          : tr("Queued: %1 downloads");
-                    message = message.arg(state->enqueuedDownloads);
+                    QString message =
+                        state->moveSources
+                            ? tr("Queued: %n downloads (move)", nullptr,
+                                 state->enqueuedDownloads)
+                            : tr("Queued: %n downloads", nullptr,
+                                 state->enqueuedDownloads);
                     if (state->enqueuedDirectories > 0) {
                         message += QStringLiteral("  |  ") +
                                    tr("Folders queued: %1")
@@ -541,9 +544,10 @@ void MainWindow::runRemoteDownloadPrescan(
                 return;
             }
             remoteScanProgress_->setLabelText(
-                tr("Scanning remote folders... %1 folders, %2 files found")
-                    .arg(progress.visitedEntries)
-                    .arg(state->enqueuedDownloads));
+                tr("Scanning remote folders... %1, %2 found")
+                    .arg(tr("%n folders", nullptr,
+                            pluralCount(progress.visitedEntries)),
+                         tr("%n files", nullptr, state->enqueuedDownloads)));
         });
     state->completionConnection =
         connect(remoteOps_, &RemoteOperationController::jobFinished, this,
@@ -952,18 +956,16 @@ void MainWindow::startLocalUploadDiscovery(
                 if (state->discovery)
                     state->discovery->deleteLater();
 
-                QString message =
+                const QString uploads =
+                    tr("%n uploads", nullptr, state->uploadCount);
+                const QString folders =
+                    tr("%n folders", nullptr, state->directoryCount);
+                const QString queued =
                     state->dragAndDrop
-                        ? tr("Queued: %1 uploads, %2 folders (DND)")
-                              .arg(state->uploadCount)
-                              .arg(state->directoryCount)
-                        : (state->moveSources
-                               ? tr("Queued: %1 uploads, %2 folders (move)")
-                                     .arg(state->uploadCount)
-                                     .arg(state->directoryCount)
-                               : tr("Queued: %1 uploads, %2 folders")
-                                     .arg(state->uploadCount)
-                                     .arg(state->directoryCount));
+                        ? tr("Queued: %1, %2 (DND)")
+                        : (state->moveSources ? tr("Queued: %1, %2 (move)")
+                                              : tr("Queued: %1, %2"));
+                QString message = queued.arg(uploads, folders);
                 const QString notes = countersSummary(counters);
                 if (!notes.isEmpty())
                     message += QStringLiteral("  |  ") + notes;

@@ -2,6 +2,7 @@
 
 #include "logic/common/LocalLinks.hpp"
 #include "logic/common/MainWindowSharedUtils.hpp"
+#include "logic/common/UiFormatters.hpp"
 #include "logic/navigation/RemotePath.hpp"
 #include "logic/remote/RemoteOperationController.hpp"
 #include "logic/transfers/TransferManager.hpp"
@@ -955,28 +956,29 @@ void SyncCoordinator::maybeFinish(
     }
     if (state->result.skippedSymlinks > 0) {
         state->result.warnings.push_back(
-            tr("%1 symbolic links were skipped.")
-                .arg(state->result.skippedSymlinks));
+            tr("%n symbolic links were skipped.", nullptr,
+               pluralCount(state->result.skippedSymlinks)));
     }
     if (state->result.depthLimits > 0) {
         state->result.warnings.push_back(
-            tr("%1 folders reached the maximum depth of %2.")
-                .arg(state->result.depthLimits)
+            tr("%n folders reached the maximum depth of %1.", nullptr,
+               pluralCount(state->result.depthLimits))
                 .arg(kMaximumDepth));
     }
     if (state->result.inaccessibleFolders > 0) {
         state->result.warnings.push_back(
-            tr("%1 folders could not be read.")
-                .arg(state->result.inaccessibleFolders));
+            tr("%n folders could not be read.", nullptr,
+               pluralCount(state->result.inaccessibleFolders)));
     }
     if (state->result.invalidNames > 0) {
         state->result.warnings.push_back(
-            tr("%1 entries with unsafe names were skipped.")
-                .arg(state->result.invalidNames));
+            tr("%n entries with unsafe names were skipped.", nullptr,
+               pluralCount(state->result.invalidNames)));
     }
     if (state->result.unknownSizes > 0) {
-        state->result.warnings.push_back(tr("%1 files have an unknown size.")
-                                             .arg(state->result.unknownSizes));
+        state->result.warnings.push_back(
+            tr("%n files have an unknown size.", nullptr,
+               pluralCount(state->result.unknownSizes)));
     }
     emit preparationReady(state->result);
 }

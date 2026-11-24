@@ -3,6 +3,7 @@
 #include "logic/common/AppSettings.hpp"
 #include "logic/common/MainWindowSharedUtils.hpp"
 #include "logic/common/UiAlerts.hpp"
+#include "logic/common/UiFormatters.hpp"
 #include "logic/connections/SessionController.hpp"
 #include "logic/connections/TlsKeyTrust.hpp"
 #include "logic/persistence/SavedSitesPersistence.hpp"
@@ -555,9 +556,8 @@ bool MainWindow::disconnectRemote() {
             UiAlerts::configure(choice);
             choice.setIcon(QMessageBox::Question);
             choice.setWindowTitle(tr("Transfers are still active"));
-            choice.setText(
-                tr("%1 transfer(s) are still active for this session.")
-                    .arg(activeTaskIds.size()));
+            choice.setText(tr("%n transfers are still active for this session.",
+                              nullptr, pluralCount(activeTaskIds.size())));
             choice.setInformativeText(
                 tr("Choose whether to keep their progress for the next "
                    "connection, cancel them, or stay connected."));
