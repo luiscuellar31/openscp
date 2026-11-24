@@ -851,6 +851,7 @@ OPENSCP_TEST(testTraversalPauseProvidesBackpressure, test) {
     RemoteOperationController::JobId traversalJob = 0;
     bool slowStarted = false;
     bool slowFinished = false;
+    bool traversalStarted = false;
     bool traversalFinished = false;
 
     QObject::connect(&controller, &RemoteOperationController::jobStarted,
@@ -858,6 +859,8 @@ OPENSCP_TEST(testTraversalPauseProvidesBackpressure, test) {
                      [&](const RemoteOperationController::JobKey &job) {
                          if (job.id == slowJob)
                              slowStarted = true;
+                         if (job.id == traversalJob)
+                             traversalStarted = true;
                      });
     QObject::connect(
         &controller, &RemoteOperationController::jobFinished, &controller,
@@ -885,6 +888,10 @@ OPENSCP_TEST(testTraversalPauseProvidesBackpressure, test) {
     controller.cancel(slowJob);
     test.check(spinUntil([&] { return slowFinished; }),
                "blocker should finish after cancellation");
+    // The window counts only once the traversal runs, so a late start
+    // cannot pass the check without it.
+    test.check(spinUntil([&] { return traversalStarted; }),
+               "the paused traversal should start");
 
     QElapsedTimer pauseWindow;
     pauseWindow.start();

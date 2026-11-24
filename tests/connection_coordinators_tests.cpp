@@ -13,7 +13,6 @@
 #include <future>
 #include <mutex>
 #include <string>
-#include <thread>
 #include <utility>
 #include <vector>
 
@@ -118,13 +117,18 @@ OPENSCP_TEST(testConcurrentHostKeyPromptsAreSerialized, test) {
     });
     test.check(waitForPresentations(presentedChanged, mutex, presented, 1),
                "the first concurrent prompt should be presented");
+    // Waiting only once the second request runs, for a presentation that
+    // must not come, keeps a slow thread start from passing unchecked.
+    std::promise<void> secondRunning;
     auto second = std::async(std::launch::async, [&] {
+        secondRunning.set_value();
         return coordinator.requestDecision(prompt(QStringLiteral("second")));
     });
-    std::this_thread::sleep_for(20ms);
+    secondRunning.get_future().wait();
     {
-        std::lock_guard<std::mutex> lock(mutex);
-        test.check(presented.size() == 1,
+        std::unique_lock<std::mutex> lock(mutex);
+        test.check(!presentedChanged.wait_for(
+                       lock, 100ms, [&] { return presented.size() > 1; }),
                    "a second prompt must not overwrite the active prompt");
     }
 
