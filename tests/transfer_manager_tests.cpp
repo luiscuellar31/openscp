@@ -2231,6 +2231,60 @@ OPENSCP_TEST(testDownloadsWhoseNamesDifferOnlyInCaseKeepBothFiles, test) {
                    contents.join(QStringLiteral(", ")).toStdString());
 }
 
+OPENSCP_TEST(testDownloadsIntoFoldersThatDifferOnlyInCaseStayApart, test) {
+    // On Windows and macOS, "Docs" and "docs" are one local folder, so the
+    // second "a.txt" replaced the first; with Move, the first remote file was
+    // already gone.
+    WritingDownloadClient baseClient;
+    TransferManager manager;
+    configureManager(manager, baseClient, testOptions());
+    QTemporaryDir destination;
+    QDir(destination.path()).mkdir(QStringLiteral("Chosen"));
+    const bool ignoresCase =
+        QFileInfo::exists(destination.filePath(QStringLiteral("chosen")));
+    const QString upper = QStringLiteral("/remote/Docs/a.txt");
+    const QString lower = QStringLiteral("/remote/docs/a.txt");
+    // The folder chosen to download into may be spelled in any case.
+    const QString intoChosen = QStringLiteral("/remote/c.txt");
+    manager.enqueueDownloads(
+        {{upper, destination.filePath(QStringLiteral("Docs/a.txt"))},
+         {lower, destination.filePath(QStringLiteral("docs/a.txt"))},
+         {intoChosen, destination.filePath(QStringLiteral("chosen/c.txt"))}},
+        testBatchOptions());
+    test.check(waitUntil([&] {
+                   const auto tasks = manager.tasksSnapshot();
+                   return tasks.size() == 3 &&
+                          std::all_of(tasks.cbegin(), tasks.cend(),
+                                      [](const TransferTask &task) {
+                                          return isTerminalTransferStatus(
+                                              task.status);
+                                      });
+               }),
+               "the downloads should finish");
+    QStringList done;
+    QStringList failed;
+    for (const TransferTask &task : manager.tasksSnapshot()) {
+        if (task.status == TransferTask::Status::Done)
+            done.push_back(task.src);
+        else
+            failed.push_back(task.src);
+    }
+    if (!ignoresCase) {
+        test.check(failed.isEmpty(),
+                   "folders that differ in case are distinct on this volume");
+        return;
+    }
+    QFile kept(destination.filePath(QStringLiteral("Docs/a.txt")));
+    const QString keptContent = kept.open(QIODevice::ReadOnly)
+                                    ? QString::fromUtf8(kept.readAll())
+                                    : QString();
+    test.check(failed.size() == 1 && failed.front() != intoChosen &&
+                   done.contains(intoChosen) && done.contains(keptContent),
+               "only the download into the merged folder should fail, done: " +
+                   done.join(QStringLiteral(", ")).toStdString() +
+                   "; kept: " + keptContent.toStdString());
+}
+
 // Reports a download in equal chunks, counted as the SFTP backend counts
 // them: from the size of the partial file when it resumes.
 class ChunkedDownloadClient final : public DownloadMockClient {

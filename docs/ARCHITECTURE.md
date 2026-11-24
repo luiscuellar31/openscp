@@ -279,7 +279,13 @@ for upload sources; this may serialize case-distinct local names on a
 case-sensitive volume. Remote keys retain case. A download whose destination
 exists only under another spelling (`localEntryName`), as when two remote names
 that differ in case meet in one file on Windows and macOS, takes a free name
-whatever the conflict policy. `ConflictCoordinator` asks about one conflict of
+whatever the conflict policy. A download fails instead when a folder named
+after its remote path exists only under another spelling, so that two remote
+folders that differ in case never merge into one. That includes a folder that
+was already there, which nothing tells from one another remote folder made,
+and the folder chosen to download into when it has a remote folder's name.
+On Linux `localEntryName` cannot read the stored name, so neither check sees
+volumes there that ignore case, such as exFAT or CIFS. `ConflictCoordinator` asks about one conflict of
 a batch at a time; the queue reads and sets a batch's policy under a lock that
 a prompt does not hold, so it never waits for the user. Partial-file cleanup applies
 only to uploads and downloads that have not finished their transfer. For a

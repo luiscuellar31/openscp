@@ -117,12 +117,12 @@ Verwenden Sie ein offizielles Paket, um vollständige Lizenzinformationen zu erh
         <translation>Die Einstellungsdatei konnte nicht synchronisiert werden.</translation>
     </message>
     <message>
-        <location filename="../ui/logic/common/AppSettings.cpp" line="156"/>
+        <location filename="../ui/logic/common/AppSettings.cpp" line="164"/>
         <source>Could not restrict settings permissions for %1</source>
         <translation>Die Berechtigungen der Einstellungsdatei %1 konnten nicht eingeschränkt werden</translation>
     </message>
     <message>
-        <location filename="../ui/logic/common/AppSettings.cpp" line="167"/>
+        <location filename="../ui/logic/common/AppSettings.cpp" line="175"/>
         <source>Settings permissions are not owner-only: %1</source>
         <translation>Die Einstellungsdatei ist nicht nur für ihren Besitzer zugänglich: %1</translation>
     </message>
@@ -3477,7 +3477,7 @@ Aktualisiert: %2  |  Fehlgeschlagen: %3</translation>
         <translation>Das Update konnte nicht installiert werden. Ihre aktuelle Version ist weiterhin verfügbar.</translation>
     </message>
     <message>
-        <location filename="../ui/app/main.cpp" line="87"/>
+        <location filename="../ui/app/main.cpp" line="86"/>
         <source>OpenSCP is already running, but it did not respond. Wait for it to finish starting or closing, then try again.</source>
         <translation>OpenSCP läuft bereits, hat aber nicht geantwortet. Warten Sie, bis es fertig gestartet oder beendet ist, und versuchen Sie es dann erneut.</translation>
     </message>
@@ -5402,32 +5402,32 @@ Andere Programme, die diese Datei verwenden, etwa ssh, erkennen den Server erst 
         <translation>Die Integritätsprüfung ist erforderlich, konnte aber nicht abgeschlossen werden. Die Übertragung ist fehlgeschlagen.</translation>
     </message>
     <message>
-        <location filename="../ui/logic/transfers/TransferManager.cpp" line="929"/>
+        <location filename="../ui/logic/transfers/TransferManager.cpp" line="948"/>
         <source>Skipped because a prerequisite task did not complete successfully.</source>
         <translation>Übersprungen, weil eine erforderliche vorherige Aufgabe nicht erfolgreich abgeschlossen wurde.</translation>
     </message>
     <message>
-        <location filename="../ui/logic/transfers/TransferManager.cpp" line="1261"/>
+        <location filename="../ui/logic/transfers/TransferManager.cpp" line="1280"/>
         <source>Transfer queue paused or disconnected</source>
         <translation>Übertragungswarteschlange pausiert oder getrennt</translation>
     </message>
     <message>
-        <location filename="../ui/logic/transfers/TransferManager.cpp" line="1278"/>
+        <location filename="../ui/logic/transfers/TransferManager.cpp" line="1297"/>
         <source>Waiting for a connection to the server</source>
         <translation>Warten auf eine Verbindung zum Server</translation>
     </message>
     <message>
-        <location filename="../ui/logic/transfers/TransferManager.cpp" line="1289"/>
+        <location filename="../ui/logic/transfers/TransferManager.cpp" line="1308"/>
         <source>No transfer connection is available</source>
         <translation>Es ist keine Übertragungsverbindung verfügbar</translation>
     </message>
     <message>
-        <location filename="../ui/logic/transfers/TransferManager.cpp" line="2171"/>
+        <location filename="../ui/logic/transfers/TransferManager.cpp" line="2190"/>
         <source>Conflict</source>
         <translation>Konflikt</translation>
     </message>
     <message>
-        <location filename="../ui/logic/transfers/TransferManager.cpp" line="2173"/>
+        <location filename="../ui/logic/transfers/TransferManager.cpp" line="2192"/>
         <source>«%1» already exists.
 Source: %2
 Destination: %3</source>
@@ -5436,88 +5436,93 @@ Quelle: %2
 Ziel: %3</translation>
     </message>
     <message>
-        <location filename="../ui/logic/transfers/TransferManager.cpp" line="2178"/>
+        <location filename="../ui/logic/transfers/TransferManager.cpp" line="2197"/>
         <source>Overwrite</source>
         <translation>Überschreiben</translation>
     </message>
     <message>
-        <location filename="../ui/logic/transfers/TransferManager.cpp" line="2182"/>
+        <location filename="../ui/logic/transfers/TransferManager.cpp" line="2201"/>
         <source>Resume</source>
         <translation>Fortsetzen</translation>
     </message>
     <message>
-        <location filename="../ui/logic/transfers/TransferManager.cpp" line="2187"/>
+        <location filename="../ui/logic/transfers/TransferManager.cpp" line="2206"/>
         <source>Rename</source>
         <translation>Umbenennen</translation>
     </message>
     <message>
-        <location filename="../ui/logic/transfers/TransferManager.cpp" line="2193"/>
+        <location filename="../ui/logic/transfers/TransferManager.cpp" line="2212"/>
         <source>Copy if newer</source>
         <translation>Kopieren, wenn neuer</translation>
     </message>
     <message>
-        <location filename="../ui/logic/transfers/TransferManager.cpp" line="2198"/>
+        <location filename="../ui/logic/transfers/TransferManager.cpp" line="2217"/>
         <source>Skip</source>
         <translation>Überspringen</translation>
     </message>
     <message>
-        <location filename="../ui/logic/transfers/TransferManager.cpp" line="2201"/>
+        <location filename="../ui/logic/transfers/TransferManager.cpp" line="2220"/>
         <source>Apply this decision to remaining conflicts</source>
         <translation>Diese Entscheidung auf verbleibende Konflikte anwenden</translation>
     </message>
     <message>
-        <location filename="../ui/logic/transfers/TransferManager.cpp" line="2303"/>
+        <location filename="../ui/logic/transfers/TransferManager.cpp" line="2322"/>
         <source>Could not reserve renamed destination</source>
         <translation>Umbenanntes Ziel konnte nicht reserviert werden</translation>
     </message>
     <message>
-        <location filename="../ui/logic/transfers/TransferManager.cpp" line="2318"/>
+        <location filename="../ui/logic/transfers/TransferManager.cpp" line="2337"/>
         <source>Could not find an available destination name</source>
         <translation>Es wurde kein verfügbarer Zielname gefunden</translation>
     </message>
     <message>
-        <location filename="../ui/logic/transfers/TransferManager.cpp" line="2411"/>
-        <location filename="../ui/logic/transfers/TransferManager.cpp" line="2445"/>
+        <location filename="../ui/logic/transfers/TransferManager.cpp" line="2430"/>
+        <location filename="../ui/logic/transfers/TransferManager.cpp" line="2464"/>
         <source>Remote path component is not a directory: %1</source>
         <translation>Remote-Pfadkomponente ist kein Verzeichnis: %1</translation>
     </message>
     <message>
-        <location filename="../ui/logic/transfers/TransferManager.cpp" line="2510"/>
+        <location filename="../ui/logic/transfers/TransferManager.cpp" line="2481"/>
         <source>Could not create local destination directory</source>
         <translation>Lokales Zielverzeichnis konnte nicht erstellt werden</translation>
     </message>
     <message>
-        <location filename="../ui/logic/transfers/TransferManager.cpp" line="2846"/>
+        <location filename="../ui/logic/transfers/TransferManager.cpp" line="2493"/>
+        <source>The folder «%1» would merge with a folder whose name differs only in letter case, which this disk treats as the same name.</source>
+        <translation>Der Ordner »%1« würde mit einem Ordner zusammenfallen, dessen Name sich nur in der Groß-/Kleinschreibung unterscheidet; dieses Laufwerk behandelt beide Namen gleich.</translation>
+    </message>
+    <message>
+        <location filename="../ui/logic/transfers/TransferManager.cpp" line="2879"/>
         <source>The source cleanup result is uncertain. Refresh both locations and reconcile the item manually before retrying.</source>
         <translation>Das Ergebnis der Quellenbereinigung ist ungewiss. Aktualisieren Sie beide Speicherorte und gleichen Sie das Element manuell ab, bevor Sie es erneut versuchen.</translation>
     </message>
     <message>
-        <location filename="../ui/logic/transfers/TransferManager.cpp" line="2913"/>
+        <location filename="../ui/logic/transfers/TransferManager.cpp" line="2946"/>
         <source>The server may have committed this operation, but its final result could not be confirmed. Refresh the destination and reconcile it manually; OpenSCP will not retry automatically.</source>
         <translation>Der Server hat diesen Vorgang möglicherweise ausgeführt, das Endergebnis konnte jedoch nicht bestätigt werden. Aktualisieren Sie das Ziel und gleichen Sie es manuell ab; OpenSCP versucht den Vorgang nicht automatisch erneut.</translation>
     </message>
     <message>
-        <location filename="../ui/logic/transfers/TransferManager.cpp" line="2940"/>
+        <location filename="../ui/logic/transfers/TransferManager.cpp" line="2973"/>
         <source>Transfer failed</source>
         <translation>Übertragung fehlgeschlagen</translation>
     </message>
     <message>
-        <location filename="../ui/logic/transfers/TransferManager.cpp" line="2969"/>
+        <location filename="../ui/logic/transfers/TransferManager.cpp" line="3002"/>
         <source>Temporary failure. Retrying automatically…</source>
         <translation>Temporärer Fehler. Automatischer neuer Versuch…</translation>
     </message>
     <message>
-        <location filename="../ui/logic/transfers/TransferManager.cpp" line="2993"/>
+        <location filename="../ui/logic/transfers/TransferManager.cpp" line="3026"/>
         <source>Transfer failed after all retry attempts</source>
         <translation>Übertragung nach allen Versuchen fehlgeschlagen</translation>
     </message>
     <message>
-        <location filename="../ui/logic/transfers/TransferManager.cpp" line="3229"/>
+        <location filename="../ui/logic/transfers/TransferManager.cpp" line="3262"/>
         <source>The transfer queue storage directory is unavailable.</source>
         <translation>Das Speicherverzeichnis der Übertragungswarteschlange ist nicht verfügbar.</translation>
     </message>
     <message>
-        <location filename="../ui/logic/transfers/TransferManager.cpp" line="3274"/>
+        <location filename="../ui/logic/transfers/TransferManager.cpp" line="3307"/>
         <source>The saved transfer queue was not restored because the current queue is not empty.</source>
         <translation>Die gespeicherte Übertragungswarteschlange wurde nicht wiederhergestellt, weil die aktuelle Warteschlange nicht leer ist.</translation>
     </message>
@@ -5910,13 +5915,13 @@ Ziel: %3</translation>
     </message>
     <message>
         <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="892"/>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="1455"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="1457"/>
         <source>Parallel: %1</source>
         <translation>Parallel: %1</translation>
     </message>
     <message>
         <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="894"/>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="1460"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="1462"/>
         <source>Global limit: off</source>
         <translation>Globales Limit: aus</translation>
     </message>
@@ -6088,110 +6093,110 @@ Ziel: %3</translation>
         <translation>KB/s (0 = kein Limit)</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="1343"/>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="1563"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="1345"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="1565"/>
         <source>Show folder</source>
         <translation>Ordner anzeigen</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="1400"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="1402"/>
         <source>No transfers in the queue
 Transfers will appear here when they start.</source>
         <translation>Keine Übertragungen in der Warteschlange
 Übertragungen werden hier angezeigt, sobald sie starten.</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="1402"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="1404"/>
         <source>No transfers match this filter</source>
         <translation>Keine Übertragungen entsprechen diesem Filter</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="1440"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="1442"/>
         <source>Total: %1</source>
         <translation>Gesamt: %1</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="1442"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="1444"/>
         <source>Active: %1</source>
         <translation>Aktiv: %1</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="1444"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="1446"/>
         <source>Running: %1</source>
         <translation>Läuft: %1</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="1446"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="1448"/>
         <source>Paused: %1</source>
         <translation>Pausiert: %1</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="1449"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="1451"/>
         <source>Errors: %1</source>
         <translation>Fehler: %1</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="1451"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="1453"/>
         <source>Completed: %1</source>
         <translation>Abgeschlossen: %1</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="1453"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="1455"/>
         <source>Canceled: %1</source>
         <translation>Abgebrochen: %1</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="1459"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="1461"/>
         <source>Global limit: %1 KB/s</source>
         <translation>Globales Limit: %1 KB/s</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="1557"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="1559"/>
         <source>Pause selected</source>
         <translation>Auswahl pausieren</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="1558"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="1560"/>
         <source>Resume selected</source>
         <translation>Auswahl fortsetzen</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="1559"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="1561"/>
         <source>Limit selected</source>
         <translation>Limit für Auswahl</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="1560"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="1562"/>
         <source>Cancel selected</source>
         <translation>Auswahl abbrechen</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="1561"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="1563"/>
         <source>Retry selected</source>
         <translation>Auswahl erneut versuchen</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="1564"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="1566"/>
         <source>Copy source path</source>
         <translation>Quellpfad kopieren</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="1565"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="1567"/>
         <source>Copy destination path</source>
         <translation>Zielpfad kopieren</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="1567"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="1569"/>
         <source>Clear finished</source>
         <translation>Beendete löschen</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="1568"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="1570"/>
         <source>Remove selected tasks</source>
         <translation>Ausgewählte Aufgaben entfernen</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="1570"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="1572"/>
         <source>Remove tasks and partial data</source>
         <translation>Aufgaben und Teildaten entfernen</translation>
     </message>

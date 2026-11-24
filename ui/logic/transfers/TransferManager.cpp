@@ -159,6 +159,26 @@ bool existsUnderAnotherName(const QFileInfo &info) {
                info.fileName().normalized(QString::NormalizationForm_C);
 }
 
+// The folder of a download's destination that exists only under another
+// name, as "docs" stored as "Docs": two remote folders would merge into one.
+// Only folders named after the remote path are checked, so the folder the
+// user chose to download into may be spelled in any case, unless it has the
+// name of a remote folder in the path.
+QString folderUnderAnotherName(const TransferTask &task) {
+    QStringList remoteFolders = task.src.split('/', Qt::SkipEmptyParts);
+    if (!remoteFolders.isEmpty())
+        remoteFolders.removeLast();
+    QFileInfo folder(QFileInfo(task.dst).path());
+    while (!remoteFolders.isEmpty()) {
+        if (folder.fileName() != remoteFolders.takeLast())
+            break;
+        if (existsUnderAnotherName(folder))
+            return folder.fileName();
+        folder = QFileInfo(folder.path());
+    }
+    return {};
+}
+
 // A failure of the local file system. The worker connection's last error may
 // belong to an earlier task, and a transient one would retry this one.
 openscp::RemoteError localFailure(const std::string &message) {
@@ -2455,6 +2475,32 @@ TransferManager::PrecheckOutcome TransferManager::precheckTask(
             }
         }
     } else {
+        std::string directoryError;
+        if (!openscp::localfiles::ensureLocalDirectories(
+                QFileInfo(task.dst).dir().absolutePath().toStdString(),
+                directoryError)) {
+            err = QCoreApplication::translate(
+                      "TransferManager",
+                      "Could not create local destination directory")
+                      .toUtf8()
+                      .toStdString() +
+                  ": " + directoryError;
+            return PrecheckOutcome::LocalError;
+        }
+        // Checked once the folders exist, because another download may have
+        // just created one of them under its own spelling.
+        if (const QString folder = folderUnderAnotherName(task);
+            !folder.isEmpty()) {
+            err = QCoreApplication::translate(
+                      "TransferManager",
+                      "The folder «%1» would merge with a folder whose name "
+                      "differs only in letter case, which this disk treats "
+                      "as the same name.")
+                      .arg(folder)
+                      .toUtf8()
+                      .toStdString();
+            return PrecheckOutcome::LocalError;
+        }
         const QFileInfo localInfo(task.dst);
         if (existsUnderAnotherName(localInfo)) {
             // Two remote names that differ only in case meet in one local
@@ -2502,18 +2548,6 @@ TransferManager::PrecheckOutcome TransferManager::precheckTask(
             }
             resume = decision.policy == Policy::Resume ||
                      (decision.policy == Policy::Overwrite && task.resumeHint);
-        }
-        std::string directoryError;
-        if (!openscp::localfiles::ensureLocalDirectories(
-                QFileInfo(task.dst).dir().absolutePath().toStdString(),
-                directoryError)) {
-            err = QCoreApplication::translate(
-                      "TransferManager",
-                      "Could not create local destination directory")
-                      .toUtf8()
-                      .toStdString() +
-                  ": " + directoryError;
-            return PrecheckOutcome::LocalError;
         }
     }
     const bool canResume = task.type == TransferTask::Type::Upload
