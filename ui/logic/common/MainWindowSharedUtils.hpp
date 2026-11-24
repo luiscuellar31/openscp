@@ -72,6 +72,18 @@ bool promptValidEntryName(QWidget *parent, const QString &dialogTitle,
                           EntryNameTarget target = EntryNameTarget::Remote);
 QString shortRemoteError(const QString &raw, const QString &fallback);
 
+// What a scan of remote folders left out.
+struct LeftOutEntries {
+    quint64 invalidNames = 0;
+    quint64 unlistedFolders = 0;
+    quint64 skippedLinks = 0;
+    quint64 depthLimits = 0;
+};
+// "Skipped invalid: 2  |  Folders not listed: 1", in the same order wherever
+// a scan reports it, without the counts that are zero; empty when nothing
+// was left out.
+QString leftOutSummary(const LeftOutEntries &leftOut);
+
 QVector<QPair<QString, QString>> buildLocalDestinationPairsWithOverwritePrompt(
     QWidget *parent, const QVector<QFileInfo> &sources,
     const QDir &destinationDir, int *skippedCount = nullptr);

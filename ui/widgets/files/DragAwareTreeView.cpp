@@ -398,7 +398,11 @@ void DragAwareTreeView::finishRemoteDragEnumeration() {
     currentBatchTotal_ = static_cast<int>(std::min<quint64>(
         enumeratedItems,
         static_cast<quint64>(std::numeric_limits<int>::max())));
-    const QString skipped = skippedDragEntriesSummary();
+    const QString skipped =
+        leftOutSummary({.invalidNames = enumInvalidNames_,
+                        .unlistedFolders = enumInaccessible_,
+                        .skippedLinks = enumSymlinksSkipped_,
+                        .depthLimits = enumDepthLimits_});
     auto *mainWindow = qobject_cast<QMainWindow *>(window());
     if (enumTargets_.isEmpty() && enumDirectories_.isEmpty()) {
         hidePrepOverlay();
@@ -475,19 +479,6 @@ void DragAwareTreeView::finishRemoteDragEnumeration() {
     enumDragRoots_.clear();
     startRemoteDragStaging(std::move(targets), std::move(directories),
                            std::move(dragRoots), stats);
-}
-
-QString DragAwareTreeView::skippedDragEntriesSummary() const {
-    QStringList parts;
-    if (enumInvalidNames_ > 0)
-        parts << tr("Skipped invalid: %1").arg(enumInvalidNames_);
-    if (enumSymlinksSkipped_ > 0)
-        parts << tr("Symbolic links skipped: %1").arg(enumSymlinksSkipped_);
-    if (enumDepthLimits_ > 0)
-        parts << tr("Depth limits reached: %1").arg(enumDepthLimits_);
-    if (enumInaccessible_ > 0)
-        parts << tr("Folders not listed: %1").arg(enumInaccessible_);
-    return parts.join(QStringLiteral("  |  "));
 }
 
 bool DragAwareTreeView::confirmRemoteDragThreshold(

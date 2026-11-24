@@ -482,6 +482,31 @@ bool promptValidEntryName(QWidget *parent, const QString &dialogTitle,
     return true;
 }
 
+QString leftOutSummary(const LeftOutEntries &leftOut) {
+    QStringList parts;
+    if (leftOut.invalidNames > 0) {
+        parts << QCoreApplication::translate("MainWindow",
+                                             "Skipped invalid: %1")
+                     .arg(leftOut.invalidNames);
+    }
+    if (leftOut.unlistedFolders > 0) {
+        parts << QCoreApplication::translate("MainWindow",
+                                             "Folders not listed: %1")
+                     .arg(leftOut.unlistedFolders);
+    }
+    if (leftOut.skippedLinks > 0) {
+        parts << QCoreApplication::translate("MainWindow",
+                                             "Symbolic links skipped: %1")
+                     .arg(leftOut.skippedLinks);
+    }
+    if (leftOut.depthLimits > 0) {
+        parts << QCoreApplication::translate("MainWindow",
+                                             "Depth limits reached: %1")
+                     .arg(leftOut.depthLimits);
+    }
+    return parts.join(QStringLiteral("  |  "));
+}
+
 QString shortRemoteError(const QString &raw, const QString &fallback) {
     QString message = raw.trimmed();
     if (message.isEmpty()) {

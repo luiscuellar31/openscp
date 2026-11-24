@@ -99,6 +99,25 @@ OPENSCP_TEST(testPathDepthOrdering, test) {
         "deep ordering should break equal-depth ties descending");
 }
 
+OPENSCP_TEST(testLeftOutSummaryHasOneOrder, test) {
+    // A drag-out and a folder download each wrote this summary, in their own
+    // order and translation context.
+    test.check(leftOutSummary({}).isEmpty(),
+               "a scan that left nothing out should say nothing");
+    test.check(
+        leftOutSummary({.invalidNames = 2, .depthLimits = 1}) ==
+            QStringLiteral("Skipped invalid: 2  |  Depth limits reached: 1"),
+        "the counts that are zero should be left out");
+    test.check(leftOutSummary({.invalidNames = 1,
+                               .unlistedFolders = 3,
+                               .skippedLinks = 4,
+                               .depthLimits = 5}) ==
+                   QStringLiteral("Skipped invalid: 1  |  Folders not listed: "
+                                  "3  |  Symbolic links skipped: 4  |  Depth "
+                                  "limits reached: 5"),
+               "the counts should keep one order");
+}
+
 OPENSCP_TEST(testLocalRenameUsesTheFilesystemMove, test) {
     QTemporaryDir temporary;
     test.check(temporary.isValid(),

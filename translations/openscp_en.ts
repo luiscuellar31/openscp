@@ -4,7 +4,7 @@
 <context>
     <name>DragAwareTreeView</name>
     <message numerus="yes">
-        <location filename="../ui/widgets/files/DragAwareTreeView.cpp" line="503"/>
+        <location filename="../ui/widgets/files/DragAwareTreeView.cpp" line="513"/>
         <source>You are about to prepare %Ln items%1. Continue?</source>
         <translation>
             <numerusform>You are about to prepare %Ln item%1. Continue?</numerusform>
@@ -12,7 +12,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../ui/widgets/files/DragAwareTreeView.cpp" line="969"/>
+        <location filename="../ui/widgets/files/DragAwareTreeView.cpp" line="965"/>
         <source>%1 of %n staging operations failed. Files kept at:</source>
         <translation>
             <numerusform>%1 of %n staging operation failed. Files kept at:</numerusform>
@@ -23,7 +23,7 @@
 <context>
     <name>MainWindow</name>
     <message numerus="yes">
-        <location filename="../ui/app/MainWindowConnection.cpp" line="559"/>
+        <location filename="../ui/app/MainWindowConnection.cpp" line="562"/>
         <source>%n transfers are still active for this session.</source>
         <translation>
             <numerusform>%n transfer is still active for this session.</numerusform>
@@ -77,8 +77,8 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../ui/app/MainWindowTransfers.cpp" line="548"/>
-        <location filename="../ui/app/MainWindowTransfers.cpp" line="962"/>
+        <location filename="../ui/app/MainWindowTransfers.cpp" line="535"/>
+        <location filename="../ui/app/MainWindowTransfers.cpp" line="949"/>
         <source>%n folders</source>
         <translation>
             <numerusform>%n folder</numerusform>
@@ -86,7 +86,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../ui/app/MainWindowTransfers.cpp" line="550"/>
+        <location filename="../ui/app/MainWindowTransfers.cpp" line="537"/>
         <source>%n files</source>
         <translation>
             <numerusform>%n file</numerusform>
@@ -94,7 +94,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../ui/app/MainWindowTransfers.cpp" line="960"/>
+        <location filename="../ui/app/MainWindowTransfers.cpp" line="947"/>
         <source>%n uploads</source>
         <translation>
             <numerusform>%n upload</numerusform>

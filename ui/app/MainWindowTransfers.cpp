@@ -258,30 +258,17 @@ void MainWindow::runRemoteDownloadPrescan(
                                    tr("Folders queued: %1")
                                        .arg(state->enqueuedDirectories);
                     }
-                    if (state->skippedInvalid > 0) {
-                        message += QStringLiteral("  |  ") +
-                                   tr("Skipped invalid: %1")
-                                       .arg(state->skippedInvalid);
-                    }
-                    if (state->listFailures > 0) {
-                        message += QStringLiteral("  |  ") +
-                                   tr("Folders not listed: %1")
-                                       .arg(state->listFailures);
-                    }
+                    const QString leftOut =
+                        leftOutSummary({.invalidNames = state->skippedInvalid,
+                                        .unlistedFolders = state->listFailures,
+                                        .skippedLinks = state->skippedSymlinks,
+                                        .depthLimits = state->depthLimits});
+                    if (!leftOut.isEmpty())
+                        message += QStringLiteral("  |  ") + leftOut;
                     if (state->unknownSizes > 0) {
                         message +=
                             QStringLiteral("  |  ") +
                             tr("Unknown sizes: %1").arg(state->unknownSizes);
-                    }
-                    if (state->skippedSymlinks > 0) {
-                        message += QStringLiteral("  |  ") +
-                                   tr("Symbolic links skipped: %1")
-                                       .arg(state->skippedSymlinks);
-                    }
-                    if (state->depthLimits > 0) {
-                        message += QStringLiteral("  |  ") +
-                                   tr("Depth limits reached: %1")
-                                       .arg(state->depthLimits);
                     }
                     if (state->canceled) {
                         message += QStringLiteral("  |  ") + tr("Canceled");
