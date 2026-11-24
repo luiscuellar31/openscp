@@ -259,7 +259,10 @@ is unavailable. CI invokes them directly so missing infrastructure is an error.
 For an existing SFTP server, set `OPENSCP_IT_SFTP_HOST`,
 `OPENSCP_IT_SFTP_PORT`, `OPENSCP_IT_SFTP_USER`, the remote base, and either a
 password or private key before running CTest. See each integration test source
-for the full list of variables it accepts.
+for the full list of variables it accepts. A check that the server cannot run,
+as one that needs an RSA host key, is reported as skipped;
+`OPENSCP_IT_REQUIRE_ALL_CHECKS=1`, which the CI sets, makes it fail the run
+instead.
 
 For code and release pull requests, both commands in the
 [pull request template](.github/pull_request_template.md) must pass. The local

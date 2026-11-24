@@ -502,6 +502,10 @@ inline void checkTlsKeyPinning(openscp::SessionOptions options,
                prefix + "another key should be refused: " + error);
 }
 
+// A check that cannot run here is skipped, as one that needs an RSA host
+// key from a server without one. A run that sets
+// OPENSCP_IT_REQUIRE_ALL_CHECKS, as the CI does, fails instead, so a broken
+// tool on its runner cannot drop checks with the job still green.
 inline int finishIntegration(std::string_view suiteName,
                              const TestContext &test) {
     if (test.failures != 0) {
@@ -509,7 +513,16 @@ inline int finishIntegration(std::string_view suiteName,
                   << '\n';
         return EXIT_FAILURE;
     }
-    std::cout << "[OK] " << suiteName << '\n';
+    if (test.skipped != 0 && envValue("OPENSCP_IT_REQUIRE_ALL_CHECKS")) {
+        std::cerr << "[FAIL] " << suiteName << " skipped " << test.skipped
+                  << " checks, and OPENSCP_IT_REQUIRE_ALL_CHECKS requires "
+                     "them all\n";
+        return EXIT_FAILURE;
+    }
+    std::cout << "[OK] " << suiteName;
+    if (test.skipped != 0)
+        std::cout << " (" << test.skipped << " checks skipped)";
+    std::cout << '\n';
     return EXIT_SUCCESS;
 }
 

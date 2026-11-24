@@ -2857,6 +2857,29 @@ OPENSCP_TEST(test_harness_names_the_failing_case, t) {
             "the harness should pick the cases named and report the others");
 }
 
+OPENSCP_TEST(test_integration_runs_can_require_every_check, t) {
+    // The SFTP checks of known_hosts need ssh-keyscan. When it failed on a
+    // runner, they were left out and the job still passed.
+    openscp::test::TestContext suite;
+    std::ostringstream output;
+    std::streambuf *const previousError = std::cerr.rdbuf(output.rdbuf());
+    std::streambuf *const previousOutput = std::cout.rdbuf(output.rdbuf());
+    suite.skip("a check that needs a tool");
+    openscp::testsupport::ScopedEnvironment environment;
+    environment.set("OPENSCP_IT_REQUIRE_ALL_CHECKS", "");
+    const int allowed = openscp::testsupport::finishIntegration("suite", suite);
+    environment.set("OPENSCP_IT_REQUIRE_ALL_CHECKS", "1");
+    const int required =
+        openscp::testsupport::finishIntegration("suite", suite);
+    std::cout.rdbuf(previousOutput);
+    std::cerr.rdbuf(previousError);
+    t.check(allowed == EXIT_SUCCESS,
+            "a skipped check alone should not fail a run");
+    t.check(required == EXIT_FAILURE,
+            "a run that requires every check should fail when one was "
+            "skipped");
+}
+
 OPENSCP_TEST(test_libssh2_jump_host_spawn, t) {
     openscp::Libssh2SftpClient c;
     openscp::SessionOptions opt = validOptions();

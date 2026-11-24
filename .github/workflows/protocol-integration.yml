@@ -132,6 +132,8 @@ jobs:
           OPENSCP_IT_SFTP_USER: openscp_it
           OPENSCP_IT_SFTP_KEY: /tmp/openscp_it_linux_ed25519
           OPENSCP_IT_REMOTE_BASE: /home/openscp_it/upload
+          # The server has ED25519 and RSA keys, so no check may be skipped.
+          OPENSCP_IT_REQUIRE_ALL_CHECKS: "1"
         run: |
           set -o pipefail
           ./build/tests/openscp_sftp_integration_tests 2>&1 | \

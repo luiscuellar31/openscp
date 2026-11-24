@@ -507,7 +507,8 @@ int main() {
             "a host known by its RSA key should match: ", strictErr);
         strictClient.disconnect();
     } else if (rsaLine.empty()) {
-        std::cout << "[SKIP] no RSA host key from ssh-keyscan\n";
+        t.skip("no RSA host key from ssh-keyscan, so a host known only by it "
+               "was not checked");
     }
 
     // known_hosts as OpenSSH leaves it: a comment, another host, a
@@ -515,6 +516,11 @@ int main() {
     // every key ssh-keyscan reads from the server, all names hashed by
     // ssh-keygen -H.
     const std::vector<std::string> scannedKeys = scanHostKeys(*host, port);
+    if (scannedKeys.empty()) {
+        t.skip("no host keys from ssh-keyscan, so known_hosts as OpenSSH "
+               "writes it, revoked keys and entries for other ports were not "
+               "checked");
+    }
     const fs::path opensshKnownHosts = localTmpRoot / "known_hosts_openssh";
     std::string opensshLines =
         std::string("# kept by OpenSSH\nother.example ssh-ed25519 ") +
@@ -542,9 +548,9 @@ int main() {
             "known_hosts as OpenSSH writes it should match the host: ",
             strictErr);
         strictClient.disconnect();
-    } else if (t.failures == 0) {
-        std::cout << "[SKIP] no known_hosts from ssh-keyscan and "
-                     "ssh-keygen -H\n";
+    } else if (t.failures == 0 && !scannedKeys.empty()) {
+        t.skip("ssh-keygen -H did not hash known_hosts, so known_hosts as "
+               "OpenSSH writes it was not checked");
     }
 
     // Keys marked @revoked are refused, as OpenSSH refuses them: under
