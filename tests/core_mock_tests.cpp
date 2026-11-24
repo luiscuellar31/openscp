@@ -31,10 +31,12 @@
 #include "libssh2/detail/SshJumpTunnel_win.hpp"
 #endif
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <cerrno>
 #include <chrono>
+#include <cstdint>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -332,6 +334,144 @@ OPENSCP_TEST(test_ssh_handshake_failure_says_why, t) {
     t.check(!connected && error.rfind(prefix, 0) == 0 &&
                 error.size() > prefix.size(),
             "a failed handshake should say why: " + error);
+}
+
+// The Proxy-Authorization a proxy gets for these credentials in Basic.
+std::string basicAuthorization(const std::string &credentials) {
+    static constexpr char kDigits[] =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    std::string encoded = "Basic ";
+    for (std::size_t index = 0; index < credentials.size(); index += 3) {
+        const std::size_t length =
+            std::min<std::size_t>(3, credentials.size() - index);
+        std::uint32_t bits = 0;
+        for (std::size_t offset = 0; offset < 3; ++offset) {
+            bits <<= 8;
+            if (offset < length)
+                bits |= static_cast<unsigned char>(credentials[index + offset]);
+        }
+        for (std::size_t digit = 0; digit < 4; ++digit)
+            encoded += digit <= length
+                           ? kDigits[(bits >> (18 - 6 * digit)) & 0x3fu]
+                           : '=';
+    }
+    return encoded;
+}
+
+// Connects through a fake HTTP proxy that answers a CONNECT without
+// credentials with a 407 and `challenge`, and one with them with a 200 and
+// the end of the tunnel. Returns the Proxy-Authorization of each CONNECT.
+std::vector<std::string> connectThroughAskingProxy(TestContext &t,
+                                                   const std::string &challenge,
+                                                   std::string &error) {
+    const int listener = ::socket(AF_INET, SOCK_STREAM, 0);
+    sockaddr_in address{};
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    socklen_t length = sizeof(address);
+    const bool listening =
+        listener >= 0 &&
+        ::bind(listener, reinterpret_cast<sockaddr *>(&address),
+               sizeof(address)) == 0 &&
+        ::listen(listener, 4) == 0 &&
+        ::getsockname(listener, reinterpret_cast<sockaddr *>(&address),
+                      &length) == 0;
+    t.check(listening, "the fake HTTP proxy should listen");
+    std::vector<std::string> authorizations;
+    if (!listening) {
+        if (listener >= 0)
+            ::close(listener);
+        return authorizations;
+    }
+    std::atomic<bool> finished{false};
+    std::thread proxy([&] {
+        for (;;) {
+            pollfd ready{listener, POLLIN, 0};
+            if (::poll(&ready, 1, 5000) <= 0)
+                return;
+            const int peer = ::accept(listener, nullptr, nullptr);
+            if (peer < 0 || finished.load()) {
+                if (peer >= 0)
+                    ::close(peer);
+                return;
+            }
+            std::string head;
+            char byte = 0;
+            while (head.find("\r\n\r\n") == std::string::npos &&
+                   ::recv(peer, &byte, 1, 0) == 1)
+                head.push_back(byte);
+            const std::size_t found = head.find("Proxy-Authorization: ");
+            authorizations.push_back(
+                found == std::string::npos
+                    ? std::string()
+                    : head.substr(found + 21,
+                                  head.find("\r\n", found) - found - 21));
+            const std::string reply =
+                found == std::string::npos
+                    ? "HTTP/1.1 407 Proxy Authentication Required\r\n"
+                      "Proxy-Authenticate: " +
+                          challenge +
+                          "\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                    : "HTTP/1.1 200 Connection established\r\n\r\n";
+            (void)::send(peer, reply.data(), reply.size(), 0);
+            ::shutdown(peer, SHUT_RDWR);
+            ::close(peer);
+        }
+    });
+    auto options = validOptions();
+    options.port = 22;
+    options.known_hosts_policy = openscp::KnownHostsPolicy::Off;
+    options.proxy_type = openscp::ProxyType::HttpConnect;
+    options.proxy_host = "127.0.0.1";
+    options.proxy_port = ntohs(address.sin_port);
+    options.proxy_username = std::string("proxy-user");
+    options.proxy_password = openscp::SecureString("proxy-secret");
+    {
+        openscp::Libssh2SftpClient client;
+        (void)client.connect(options, error);
+    }
+    // Wakes the proxy if it still waits for a connection.
+    finished = true;
+    const int waker = ::socket(AF_INET, SOCK_STREAM, 0);
+    if (waker >= 0) {
+        (void)::connect(waker, reinterpret_cast<sockaddr *>(&address),
+                        sizeof(address));
+        ::close(waker);
+    }
+    proxy.join();
+    ::close(listener);
+    return authorizations;
+}
+
+OPENSCP_TEST(test_http_proxy_gets_the_password_only_when_it_asks, t) {
+    // Basic sends the password in the clear, so it must not go to a proxy
+    // before that proxy asks for it with a 407.
+    std::string error;
+    const auto basic = connectThroughAskingProxy(
+        t, "Digest realm=\"proxy\", nonce=\"a,b\", Basic realm=\"proxy\"",
+        error);
+    t.check(basic.size() == 2 && basic[0].empty() &&
+                basic[1] == basicAuthorization("proxy-user:proxy-secret"),
+            "the first CONNECT should go without the password and the next "
+            "one answer the Basic challenge");
+
+    error.clear();
+    const auto other = connectThroughAskingProxy(t, "NTLM, Negotiate", error);
+    t.check(other.size() == 1 && other[0].empty() &&
+                error.find("NTLM, Negotiate") != std::string::npos,
+            "a proxy that offers no Basic should never get the password, and "
+            "the error should name what it offers: " +
+                error);
+
+    // A quoted backslash, spaces around "=", and a challenge that goes on in
+    // a second line: Basic is still among the schemes on offer.
+    error.clear();
+    const auto unusual = connectThroughAskingProxy(
+        t, "Digest realm=\"a\\\\\", nonce = \"b,c\",\r\n Basic realm=\"proxy\"",
+        error);
+    t.check(unusual.size() == 2 && unusual[0].empty() &&
+                unusual[1] == basicAuthorization("proxy-user:proxy-secret"),
+            "Basic should be found in an unusually written challenge");
 }
 
 OPENSCP_TEST(test_ssh_reaches_a_bracketed_ipv6_host, t) {

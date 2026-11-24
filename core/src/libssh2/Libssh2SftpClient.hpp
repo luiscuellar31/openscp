@@ -141,6 +141,10 @@ class Libssh2SftpClient : public RemoteClient {
 
     // TCP connection + SSH handshake and authentication.
     bool tcpConnect(const SessionOptions &opt, std::string &err);
+    // Opens a new connection to the proxy in place of the current one.
+    bool reconnectToProxy(const SessionOptions &opt,
+                          libssh2detail::SocketHandle &socketFd,
+                          std::string &err);
     bool sshHandshakeAuth(const SessionOptions &opt, std::string &err,
                           bool initializeSftpSubsystem);
     bool connectInternal(const SessionOptions &opt, std::string &err,

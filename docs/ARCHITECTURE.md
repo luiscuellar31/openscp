@@ -176,7 +176,9 @@ Happy Eyeballs (RFC 8305) does: `connectToFirstEndpoint` starts the next
 resolved address when an attempt has not connected after 250 ms or fails,
 alternating families, keeps the earlier attempts going, and gives all of them
 a shared 20-second deadline. The platform's synchronous DNS resolver remains
-outside that TCP deadline.
+outside that TCP deadline. Its HTTP CONNECT sends the proxy credentials only
+after a 407 that offers Basic, over a new connection to the proxy, and names
+the other schemes a proxy asks for, which it does not support.
 libssh2's blocking handshake/authentication timeout is set explicitly. That
 20-second timeout also covers each blocking SFTP write, so an upload passes
 about two seconds of data per write at the rate it has reached, from 32 KiB up

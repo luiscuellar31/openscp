@@ -2151,11 +2151,91 @@ bool establish_socks5_tunnel(SocketHandle sock, const SessionOptions &opt,
     return true;
 }
 
-bool establish_http_connect_tunnel(SocketHandle sock, const SessionOptions &opt,
-                                   std::string &err) {
+bool equals_ignoring_ascii_case(std::string_view left, std::string_view right) {
+    return left.size() == right.size() &&
+           std::equal(left.begin(), left.end(), right.begin(),
+                      [](unsigned char a, unsigned char b) {
+                          return std::tolower(a) == std::tolower(b);
+                      });
+}
+
+// The authentication schemes that the Proxy-Authenticate headers of a 407
+// offer. A challenge starts with its scheme; the parameters after it, which
+// commas separate as they separate challenges, have a name and an "=".
+std::vector<std::string> proxy_authentication_schemes(const std::string &head) {
+    const auto trimmed = [](std::string_view text) {
+        const std::size_t first = text.find_first_not_of(" \t");
+        if (first == std::string_view::npos)
+            return std::string_view();
+        return text.substr(first, text.find_last_not_of(" \t") - first + 1);
+    };
+    // A header may go on in a line that starts with a space or a tab.
+    std::string unfolded = head;
+    for (std::size_t at = unfolded.find("\r\n"); at != std::string::npos;
+         at = unfolded.find("\r\n", at)) {
+        if (at + 2 < unfolded.size() &&
+            (unfolded[at + 2] == ' ' || unfolded[at + 2] == '\t'))
+            unfolded.replace(at, 2, " ");
+        else
+            at += 2;
+    }
+    std::vector<std::string> schemes;
+    std::size_t lineEnd = unfolded.find("\r\n");
+    while (lineEnd != std::string::npos) {
+        const std::size_t lineStart = lineEnd + 2;
+        lineEnd = unfolded.find("\r\n", lineStart);
+        const std::string_view line = std::string_view(unfolded).substr(
+            lineStart, lineEnd == std::string::npos ? std::string_view::npos
+                                                    : lineEnd - lineStart);
+        const std::size_t colon = line.find(':');
+        if (colon == std::string_view::npos ||
+            !equals_ignoring_ascii_case(trimmed(line.substr(0, colon)),
+                                        "Proxy-Authenticate"))
+            continue;
+        const std::string_view value = line.substr(colon + 1);
+        bool quoted = false;
+        std::size_t elementStart = 0;
+        for (std::size_t index = 0; index <= value.size(); ++index) {
+            if (index < value.size()) {
+                // A backslash in a quoted string takes the next character
+                // as it is, a quote included.
+                if (quoted && value[index] == '\\' &&
+                    index + 1 < value.size()) {
+                    ++index;
+                    continue;
+                }
+                if (value[index] == '"')
+                    quoted = !quoted;
+                if (value[index] != ',' || quoted)
+                    continue;
+            }
+            const std::string_view element =
+                trimmed(value.substr(elementStart, index - elementStart));
+            elementStart = index + 1;
+            const std::size_t nameEnd = element.find_first_of(" \t=");
+            const std::size_t next = element.find_first_not_of(
+                " \t",
+                nameEnd == std::string_view::npos ? element.size() : nameEnd);
+            if (!element.empty() &&
+                (next == std::string_view::npos || element[next] != '='))
+                schemes.emplace_back(element.substr(0, nameEnd));
+        }
+    }
+    return schemes;
+}
+
+enum class HttpConnectOutcome { Established, AskedForBasic, Failed };
+
+// Sends CONNECT and reads the proxy's answer. The credentials go only with
+// sendCredentials, once a 407 has asked for them: a proxy that does not ask
+// never sees the password, which Basic sends in the clear.
+HttpConnectOutcome establish_http_connect_tunnel(SocketHandle sock,
+                                                 const SessionOptions &opt,
+                                                 bool sendCredentials,
+                                                 std::string &err) {
     if (opt.host.empty()) {
         err = "HTTP CONNECT target host is empty.";
-        return false;
+        return HttpConnectOutcome::Failed;
     }
     const std::string authority =
         format_host_port_authority(opt.host, opt.port);
@@ -2163,12 +2243,13 @@ bool establish_http_connect_tunnel(SocketHandle sock, const SessionOptions &opt,
     const bool hasProxyAuth =
         (opt.proxy_username && !opt.proxy_username->empty()) ||
         (opt.proxy_password && !opt.proxy_password->empty());
+    const bool sendsAuth = sendCredentials && hasProxyAuth;
 
     std::string req;
-    req.reserve(256 + (hasProxyAuth ? 128 : 0));
+    req.reserve(256 + (sendsAuth ? 128 : 0));
     // Automatically wipe any sensitive Authorization header from RAM upon scope
     // exit
-    CleanseOnScopeExit reqCleanse(req, hasProxyAuth);
+    CleanseOnScopeExit reqCleanse(req, sendsAuth);
 
     req += "CONNECT ";
     req += authority;
@@ -2179,7 +2260,7 @@ bool establish_http_connect_tunnel(SocketHandle sock, const SessionOptions &opt,
     req += "Proxy-Connection: Keep-Alive\r\n";
     req += "User-Agent: OpenSCP\r\n";
 
-    if (hasProxyAuth) {
+    if (sendsAuth) {
         const std::string user =
             opt.proxy_username ? *opt.proxy_username : std::string();
         std::string creds = user + ":";
@@ -2201,37 +2282,55 @@ bool establish_http_connect_tunnel(SocketHandle sock, const SessionOptions &opt,
     if (!socket_send_all(sock,
                          reinterpret_cast<const unsigned char *>(req.data()),
                          req.size(), "HTTP CONNECT", err)) {
-        return false;
+        return HttpConnectOutcome::Failed;
     }
 
     std::string response;
     if (!socket_recv_until(sock, "\r\n\r\n", 8192, "HTTP CONNECT", response,
                            err)) {
-        return false;
+        return HttpConnectOutcome::Failed;
     }
     const std::size_t eol = response.find("\r\n");
     const std::string statusLine =
         (eol == std::string::npos) ? response : response.substr(0, eol);
     if (statusLine.rfind("HTTP/", 0) != 0) {
         err = "HTTP proxy returned invalid response to CONNECT.";
-        return false;
+        return HttpConnectOutcome::Failed;
     }
     std::istringstream iss(statusLine);
     std::string httpVersion;
     int statusCode = 0;
     iss >> httpVersion >> statusCode;
     if (statusCode == 200)
-        return true;
+        return HttpConnectOutcome::Established;
     if (statusCode == 407) {
+        if (hasProxyAuth && !sendsAuth) {
+            const std::vector<std::string> schemes =
+                proxy_authentication_schemes(response);
+            // A 407 that names no scheme gets Basic, as it always did.
+            if (schemes.empty() ||
+                std::any_of(schemes.begin(), schemes.end(),
+                            [](const std::string &scheme) {
+                                return equals_ignoring_ascii_case(scheme,
+                                                                  "Basic");
+                            }))
+                return HttpConnectOutcome::AskedForBasic;
+            std::string offered;
+            for (const std::string &scheme : schemes)
+                offered += (offered.empty() ? "" : ", ") + scheme;
+            err = "HTTP proxy asks for sign-in by " + offered +
+                  ", which is not supported for SFTP and SCP; only Basic is.";
+            return HttpConnectOutcome::Failed;
+        }
         err = "HTTP proxy authentication required or failed (407).";
-        return false;
+        return HttpConnectOutcome::Failed;
     }
     if (statusCode > 0) {
         err = "HTTP CONNECT tunnel rejected: " + statusLine;
-        return false;
+        return HttpConnectOutcome::Failed;
     }
     err = "HTTP proxy returned malformed CONNECT status.";
-    return false;
+    return HttpConnectOutcome::Failed;
 }
 
 } // namespace
@@ -2324,7 +2423,18 @@ bool Libssh2SftpClient::tcpConnect(const SessionOptions &opt,
         if (opt.proxy_type == ProxyType::Socks5) {
             ok = establish_socks5_tunnel(socketFd, opt, err);
         } else if (opt.proxy_type == ProxyType::HttpConnect) {
-            ok = establish_http_connect_tunnel(socketFd, opt, err);
+            HttpConnectOutcome outcome =
+                establish_http_connect_tunnel(socketFd, opt, false, err);
+            if (outcome == HttpConnectOutcome::AskedForBasic) {
+                // A proxy may close the connection after its 407, so the
+                // credentials go over a new one.
+                if (!reconnectToProxy(opt, socketFd, err))
+                    return false;
+                (void)set_socket_timeout_ms(socketFd, kProxyHandshakeTimeoutMs);
+                outcome =
+                    establish_http_connect_tunnel(socketFd, opt, true, err);
+            }
+            ok = outcome == HttpConnectOutcome::Established;
         } else {
             err = "Unsupported proxy type.";
         }
@@ -2334,6 +2444,27 @@ bool Libssh2SftpClient::tcpConnect(const SessionOptions &opt,
         }
     }
 
+    return true;
+}
+
+bool Libssh2SftpClient::reconnectToProxy(const SessionOptions &opt,
+                                         SocketHandle &socketFd,
+                                         std::string &err) {
+    SocketHandle again = kInvalidSocket;
+    if (!connect_tcp_endpoint(opt.proxy_host, opt.proxy_port, again, err,
+                              opt.connection_stop_token))
+        return false;
+    {
+        std::lock_guard<std::mutex> lock(stateMutex_);
+        libssh2detail::closeSocket(sock_);
+        sock_ = again;
+    }
+    socketFd = again;
+    if (opt.connection_stop_token.stop_requested()) {
+        interrupt();
+        err = "Connection canceled by user";
+        return false;
+    }
     return true;
 }
 
