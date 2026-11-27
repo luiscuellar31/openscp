@@ -2,16 +2,65 @@
   <img src="assets/icons/app/macos-light/openscp-256.png" alt="Icono de OpenSCP" width="128">
   <h1>OpenSCP</h1>
 
-  <p><strong>Un cliente ligero y multiplataforma para transferir archivos, con flujo de trabajo de doble panel, configuración segura por defecto y compatibilidad con SFTP, SCP, FTP, FTPS y WebDAV.</strong></p>
-  <p><a href="README.md">Read in English</a></p>
+  <p><strong>Un cliente multiplataforma de SFTP, SCP, FTP, FTPS y WebDAV con una interfaz de doble panel al estilo de WinSCP.</strong></p>
+  <p><a href="https://github.com/luiscuellar31/openscp/releases/latest"><img src="https://img.shields.io/github/v/release/luiscuellar31/openscp?label=%C3%BAltima%20versi%C3%B3n" alt="Última versión"></a></p>
+  <p><a href="#descarga">Descarga</a> · <a href="#características">Características</a> · <a href="#capturas">Capturas</a> · <a href="#documentación">Documentación</a> · <a href="README.md">Read in English</a></p>
 
-  <img src="assets/screenshots/screenshot-main-window.png" alt="Ventana principal de OpenSCP" width="900">
+  <img src="assets/screenshots/screenshot-main-window.png" alt="OpenSCP con una carpeta local y un servidor SFTP lado a lado" width="900">
 </div>
 
-OpenSCP es una aplicación de escritorio escrita en C++20 y Qt 6 para mover y
-administrar archivos entre sistemas locales y remotos. Prioriza un
-comportamiento predecible, configuraciones seguras y una interfaz familiar de
-doble panel.
+OpenSCP mueve y administra archivos entre tu equipo y un servidor. Muestra los
+archivos locales y remotos lado a lado en dos paneles, con cola de
+transferencias, sincronización en un sentido y opciones seguras por defecto, y
+funciona en macOS, Linux y Windows.
+
+## Características
+
+- **Dos paneles:** archivos locales y remotos lado a lado, con rutas planas y
+  clicables, diálogo para abrir directorios, historial, favoritos, búsqueda y
+  la posibilidad de arrastrar y soltar.
+- **Protocolos:** SFTP, SCP, FTP, FTPS y WebDAV. El paquete Flatpak solo trae
+  SFTP y SCP; consulta la
+  [matriz de protocolos](docs/PLATFORM_COMPATIBILITY.md#protocol-availability-by-build).
+- **Transferencias:** cola persistente con transferencias en paralelo, pausa,
+  reanudación, reintentos, políticas de conflicto, límites de ancho de banda y
+  archivos `.part` reanudables.
+- **Sitios guardados:** contraseñas en el Keychain de macOS, en Secret
+  Service/libsecret en Linux y con cifrado DPAPI en Windows.
+- **Identidad del servidor:** verificación de claves SSH estricta, con
+  aceptación de claves nuevas o deshabilitada explícitamente. Las claves que
+  `known_hosts` marca como `@revoked` se rechazan, como hace OpenSSH. FTPS y
+  WebDAV por HTTPS sin verificación del certificado siguen comprobando la clave
+  pública del servidor, en la que confías en la primera conexión.
+- **Proxies:** SOCKS5, HTTP CONNECT y servidores de salto SSH cuando el
+  protocolo lo permite.
+- **Sincronización:** en un sentido, con vista previa, filtros y sumas de
+  comprobación opcionales.
+- **Idiomas:** español, inglés, portugués, francés y alemán.
+
+La [guía de uso](docs/USAGE_ES.md) explica cómo se comportan las conexiones,
+las transferencias y la sincronización en los casos poco habituales.
+
+## Capturas
+
+<p align="center">
+  <img src="assets/screenshots/screenshot-site-manager.png" alt="Sitios guardados" width="32%">
+  <img src="assets/screenshots/screenshot-connect.png" alt="Diálogo de conexión" width="32%">
+  <img src="assets/screenshots/screenshot-transfer-queue.png" alt="Cola de transferencias" width="32%">
+</p>
+
+<p align="center">
+  <img src="assets/screenshots/screenshot-history.png" alt="Historial de navegación" width="32%">
+  <img src="assets/screenshots/screenshot-favorites.png" alt="Rutas favoritas" width="32%">
+  <img src="assets/screenshots/screenshot-settings.png" alt="Ajustes de la aplicación" width="32%">
+</p>
+
+<details>
+  <summary>Opciones avanzadas de conexión</summary>
+  <p align="center">
+    <img src="assets/screenshots/screenshot-connect-extended.png" alt="Opciones avanzadas de conexión" width="60%">
+  </p>
+</details>
 
 ## Descarga
 
@@ -20,13 +69,14 @@ Los binarios precompilados de cada versión etiquetada están en la
 
 | Plataforma | Archivo |
 | --- | --- |
-| macOS, Apple Silicon | `OpenSCP-<versión>-arm64-UNSIGNED.dmg` |
-| macOS, Intel | `OpenSCP-<versión>-x86_64-UNSIGNED.dmg` |
-| Linux, x86_64 | `OpenSCP-<versión>-x86_64.AppImage` |
-| Linux, ARM64 | `OpenSCP-<versión>-aarch64.AppImage` |
-| Linux, paquete Flatpak | `OpenSCP-x86_64.flatpak`, `OpenSCP-aarch64.flatpak` |
-| Windows 10 y 11, x64 | `OpenSCP-<versión>-x64-setup.exe` |
-| Windows, x64, MSI para todos los usuarios | `OpenSCP-<versión>-x64.msi` |
+| macOS 13 o posterior, Apple Silicon | `OpenSCP-<versión>-arm64-UNSIGNED.dmg` |
+| macOS 13 o posterior, Intel | `OpenSCP-<versión>-x86_64-UNSIGNED.dmg` |
+| Linux x86_64, glibc 2.34 o posterior | `OpenSCP-<versión>-x86_64.AppImage` |
+| Linux ARM64, glibc 2.39 o posterior | `OpenSCP-<versión>-aarch64.AppImage` |
+| Linux x86_64, paquete Flatpak | `OpenSCP-x86_64.flatpak` |
+| Linux ARM64, paquete Flatpak | `OpenSCP-aarch64.flatpak` |
+| Windows 10 versión 1809 o posterior, x64 | `OpenSCP-<versión>-x64-setup.exe` |
+| Windows 10 versión 1809 o posterior, x64, MSI para todos los usuarios | `OpenSCP-<versión>-x64.msi` |
 
 Cada versión incluye un `SHA256SUMS.txt` que cubre todos esos archivos.
 Descárgalo junto al que hayas elegido y compruébalos juntos:
@@ -51,20 +101,7 @@ de este repositorio, usa la [CLI de GitHub](https://cli.github.com/):
 gh attestation verify OpenSCP-<versión>-x86_64.AppImage --repo luiscuellar31/openscp
 ```
 
-### Actualizaciones
-
-Usa **OpenSCP → Buscar actualizaciones…** (**Ayuda → Buscar actualizaciones…**
-en Windows) para consultar la última versión estable.
-**Buscar actualizaciones automáticamente** activa una consulta diaria;
-está desactivada por defecto. La instalación requiere confirmación y que hayan
-terminado las operaciones de archivos pendientes. Los builds configurados con
-firmas pueden instalar actualizaciones de AppImage, macOS y el instalador de
-Windows; los demás abren la página de la versión. Flatpak y Snap usan su gestor de software. Los paquetes
-Flatpak independientes requieren descargar el nuevo paquete si no se configuró
-un repositorio de actualizaciones.
-Consulta [Cómo actualizar OpenSCP](docs/UPDATES.md) para más detalles.
-
-### Instalación en macOS
+### macOS
 
 Abre el DMG, arrastra OpenSCP a la carpeta Aplicaciones y ábrelo desde ahí.
 
@@ -92,7 +129,7 @@ y seguridad es la única disponible en la interfaz; y como las compilaciones sin
 firmar no tienen una identidad estable, macOS vuelve a pedir permiso de llavero
 después de cada actualización cuando OpenSCP lee tus contraseñas guardadas.
 
-### Instalación en Linux
+### Linux
 
 El AppImage no requiere instalación y funciona en la mayoría de distribuciones:
 
@@ -112,7 +149,7 @@ flatpak run io.github.luiscuellar31.openscp
 El remoto de Flathub es necesario porque el paquete depende del entorno de
 ejecución de KDE.
 
-### Instalación en Windows
+### Windows
 
 OpenSCP necesita Windows 10 versión 1809 o posterior, o Windows 11, en x64.
 Ejecuta `OpenSCP-<versión>-x64-setup.exe`: instala OpenSCP para tu usuario, sin
@@ -138,12 +175,20 @@ Internet, así que Windows los revisa antes de abrirlos. Los servidores que
 agregues a **Intranet local** o **Sitios de confianza** en Opciones de Internet
 no se marcan.
 
+### Actualizaciones
+
+Usa **OpenSCP → Buscar actualizaciones…** (**Ayuda → Buscar actualizaciones…**
+en Windows) para consultar la última versión estable. **Buscar actualizaciones
+automáticamente** activa una consulta diaria; está desactivada por defecto. Que
+OpenSCP pueda instalar la actualización por sí mismo depende de cómo lo
+instalaste: consulta [Cómo actualizar OpenSCP](docs/UPDATES.md).
+
 ## Compilar desde el código fuente
 
-OpenSCP se compila en Linux, macOS y Windows. Requiere Qt 6, CMake 3.22+,
-libssh2 y OpenSSL. libcurl habilita FTP y FTPS; WebDAV requiere libcurl y
-tinyxml2. En Windows lo compila Visual Studio 2022 con Qt para MSVC, y vcpkg
-compila las demás bibliotecas.
+OpenSCP está escrito en C++20 con Qt 6 y se compila en Linux, macOS y Windows.
+Requiere Qt 6, CMake 3.22+, libssh2 y OpenSSL. libcurl habilita FTP y FTPS;
+WebDAV requiere libcurl y tinyxml2. En Windows lo compila Visual Studio 2022
+con Qt para MSVC, y vcpkg compila las demás bibliotecas.
 
 ```bash
 git clone https://github.com/luiscuellar31/openscp.git
@@ -165,139 +210,18 @@ $env:VCPKG_ROOT = 'C:\ruta\a\vcpkg'
 Consulta [Compilar OpenSCP](docs/BUILDING.md) para dependencias por plataforma,
 pasos manuales, empaquetado y solución de problemas.
 
-## Características principales
-
-- Navegación local y remota de doble panel con rutas planas y clicables, diálogo
-  para abrir directorios, historial, favoritos, búsqueda y la posibilidad de
-  arrastrar y soltar.
-- SFTP y SCP mediante libssh2; FTP, FTPS y WebDAV opcionales mediante libcurl.
-- Cola persistente con transferencias en paralelo, pausa, reanudación,
-  reintentos, políticas de conflicto, límites de ancho de banda y archivos
-  `.part`.
-- Sitios guardados con Keychain en macOS, Secret Service/libsecret en Linux y
-  cifrado DPAPI en Windows.
-- Verificación estricta de claves SSH, con aceptación de claves nuevas o
-  deshabilitada explícitamente. Las claves que `known_hosts` marca como
-  `@revoked` se rechazan, como hace OpenSSH.
-- FTPS y WebDAV por HTTPS sin verificación del certificado siguen comprobando
-  la clave pública del servidor, en la que confías en la primera conexión.
-- Proxies SOCKS5 y HTTP CONNECT, además de servidores de salto SSH cuando el
-  protocolo lo permite.
-- Sincronización unidireccional con vista previa, filtros y sumas de
-  comprobación opcionales.
-- Interfaces en español, inglés, portugués, francés y alemán.
-
-Cancelar una conexión o cerrar la ventana también cancela las solicitudes
-pendientes de autenticación SSH y confirmación de huella. SSH prueba las
-direcciones resueltas como hace Happy Eyeballs: si una no ha respondido en
-250 ms, o rechaza la conexión, empieza la siguiente, alternando IPv6 e IPv4, y
-todos los intentos comparten un límite de 20 segundos. La resolución de nombres
-usa el sistema y puede tardar más, independientemente de ese límite TCP.
-
-La sincronización nunca copia FIFOs, sockets ni dispositivos, y deja fuera los
-nombres con barra invertida o caracteres de control, que las subidas también
-rechazan. Un nombre que solo se diferencia de otro del lado contrario en
-mayúsculas o normalización Unicode aparece como conflicto y no se copia ni se
-borra.
-
-Las descargas requieren archivos `.part` regulares. Si una entrada `.part`
-existente es una FIFO (tubería con nombre), la descarga informa de un error de
-E/S local sin esperar a un lector ni reemplazar esa entrada. Elige otro destino
-o revisa la entrada en conflicto antes de reintentar.
-
-Las transferencias que comparten un destino o su ruta `.part` se ejecutan en
-serie. Los nombres locales que solo difieren en mayúsculas o normalización
-Unicode también se ejecutan en serie, incluso en volúmenes que los distinguen.
-Al eliminar una tarea con sus datos parciales, se conserva el `.part` mientras
-otra tarea de la cola pueda reanudarse desde él, y no se borra nada de las
-tareas terminadas ni de las subidas por SCP clásico, que escriben directamente
-en el destino.
-
-Al mover un archivo local al servidor en macOS y Linux, OpenSCP completa la
-subida y conserva el origen local con una advertencia. El borrado automático no puede excluir que
-otro proceso sustituya el origen después de comprobarlo. Revisa la subida y el
-archivo local antes de borrarlo manualmente; después, reintenta la tarea para
-completar la limpieza sin repetir la subida. Tras reiniciar, la limpieza
-requiere revisión manual porque ya no se dispone de la identidad original del
-archivo. En Windows, OpenSCP borra el origen local después de la subida si no
-cambió: mantiene el archivo abierto contra cambios mientras lo comprueba y lo
-borra. La limpieza del origen remoto al mover archivos mediante descarga
-mantiene su comportamiento.
-
-## Navegación por rutas
-
-Cada panel presenta la ubicación actual como un campo de ruta convencional. Haz
-clic en cualquier directorio superior dentro de la ruta para abrirlo, o en el
-directorio actual para mostrar el diálogo **Abrir directorio**. También puedes
-usar `Ctrl+L` (`Cmd+L` también está disponible en macOS) o el atajo Abrir de
-la plataforma: `Ctrl+O` en Linux y Windows y `Cmd+O` en macOS.
-
-El diálogo permite escribir una ruta directamente y consultar las rutas
-recientes y los favoritos del panel local o de la sesión remota seleccionada.
-Consulta [Atajos de teclado](docs/KEYBOARD_SHORTCUTS.md) para conocer todos los
-atajos y cuándo dependen del panel activo.
-
-Los protocolos disponibles dependen del paquete. Consulta la
-[matriz de protocolos](docs/PLATFORM_COMPATIBILITY.md#protocol-availability-by-build)
-antes de elegir un paquete.
-
 ## Documentación
 
-- [Compilación y empaquetado](docs/BUILDING.md)
+- [Cómo usar OpenSCP](docs/USAGE_ES.md)
 - [Atajos de teclado](docs/KEYBOARD_SHORTCUTS.md)
-- [Contribuciones y traducciones](CONTRIBUTING.md)
-- [Arquitectura](docs/ARCHITECTURE.md)
+- [Cómo actualizar OpenSCP](docs/UPDATES.md)
 - [Compatibilidad de plataformas y protocolos](docs/PLATFORM_COMPATIBILITY.md)
+- [Compilación y empaquetado](docs/BUILDING.md)
+- [Arquitectura](docs/ARCHITECTURE.md)
+- [Pruebas de accesibilidad](docs/ACCESSIBILITY.md)
+- [Contribuciones y traducciones](CONTRIBUTING.md)
 - [Política de seguridad](SECURITY.md)
 - [Licenciamiento](docs/LICENSING.md)
-
-## Diagnóstico en ejecución
-
-Estas variables opcionales ayudan a diagnosticar problemas:
-
-- `OPENSCP_LOG_LEVEL=off|error|warn|info|debug`
-- `OPENSCP_TRANSFER_INTEGRITY=off|optional|required`
-- `OPENSCP_KNOWNHOSTS_PLAIN=1|0`
-- `OPENSCP_FP_HEX_ONLY=1`
-- `OPENSCP_ENV=dev|prod` selecciona el entorno de ejecución
-- `OPENSCP_LOG_SENSITIVE=1` permite detalles sensibles de diagnóstico solamente
-  junto con `OPENSCP_ENV=dev`
-- `OPENSCP_ENABLE_INSECURE_FALLBACK=1` solo cuando la compilación lo permite
-
-Los mensajes van a la salida de error estándar. En Windows, donde OpenSCP no
-muestra consola, van también a la salida del depurador, que
-[DebugView](https://learn.microsoft.com/sysinternals/downloads/debugview)
-muestra al momento. Para guardarlos en un archivo, ábrelo desde PowerShell
-guardando la salida de error en uno:
-
-```powershell
-$env:OPENSCP_LOG_LEVEL = 'debug'
-Start-Process OpenSCP.exe -RedirectStandardError openscp.log
-```
-
-Los registros sensibles están deshabilitados por defecto y solo deberían
-activarse temporalmente en un entorno de desarrollo controlado.
-
-## Más capturas
-
-<p align="center">
-  <img src="assets/screenshots/screenshot-site-manager.png" alt="Sitios guardados" width="32%">
-  <img src="assets/screenshots/screenshot-connect.png" alt="Diálogo de conexión" width="32%">
-  <img src="assets/screenshots/screenshot-transfer-queue.png" alt="Cola de transferencias" width="32%">
-</p>
-
-<p align="center">
-  <img src="assets/screenshots/screenshot-history.png" alt="Historial de navegación" width="32%">
-  <img src="assets/screenshots/screenshot-favorites.png" alt="Rutas favoritas" width="32%">
-  <img src="assets/screenshots/screenshot-settings.png" alt="Ajustes de la aplicación" width="32%">
-</p>
-
-<details>
-  <summary>Opciones avanzadas de conexión</summary>
-  <p align="center">
-    <img src="assets/screenshots/screenshot-connect-extended.png" alt="Opciones avanzadas de conexión" width="60%">
-  </p>
-</details>
 
 ## Roadmap
 
@@ -307,15 +231,14 @@ activarse temporalmente en un entorno de desarrollo controlado.
   proxies y servidores de salto SSH.
 - Añadir una paleta de comandos y temas seleccionables.
 
-## Lanzamientos y contribuciones
-
-Las versiones publicadas están disponibles en
-[GitHub Releases](https://github.com/luiscuellar31/openscp/releases).
-`main` contiene el trabajo estable y `dev` recibe los pull requests.
+## Contribuir
 
 Las contribuciones son bienvenidas. Lee [CONTRIBUTING.md](CONTRIBUTING.md)
-antes de abrir un pull request. Reporta vulnerabilidades de forma privada como
-indica [SECURITY.md](SECURITY.md).
+antes de abrir un pull request: `main` contiene el trabajo estable y `dev`
+recibe los pull requests. Reporta vulnerabilidades de forma privada como indica
+[SECURITY.md](SECURITY.md).
+
+## Licencia
 
 OpenSCP está disponible bajo GPLv3-only o una licencia comercial. Los
 componentes de terceros conservan sus propias licencias; consulta
