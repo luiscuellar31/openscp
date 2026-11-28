@@ -211,9 +211,9 @@ void MainWindow::requestRemoteListing(const QString &path, bool refresh,
             openscpui::disableWithoutPassingFocus(rightView_) ||
             remoteViewHadFocus_;
     }
-    statusBar()->showMessage(refresh ? tr("Refreshing remote folder…")
-                                     : tr("Opening remote folder…"),
-                             0);
+    remoteListingMessage_ = refresh ? tr("Refreshing remote folder…")
+                                    : tr("Opening remote folder…");
+    statusBar()->showMessage(remoteListingMessage_, 0);
 
     RemoteOperationController::ListRequest request;
     request.path = normalized;

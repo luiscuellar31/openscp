@@ -1172,6 +1172,8 @@ void MainWindow::initializeRuntimeState() {
                     scrollValue = rightView_->verticalScrollBar()->value();
             }
             rightRemoteModel_->setEntries(result.path, entries);
+            if (statusBar()->currentMessage() == remoteListingMessage_)
+                statusBar()->clearMessage();
             openscpui::enableRestoringFocus(
                 rightView_, std::exchange(remoteViewHadFocus_, false));
             sessionHealthMonitor_.recordActivity();

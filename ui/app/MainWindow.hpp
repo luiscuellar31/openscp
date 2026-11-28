@@ -428,6 +428,9 @@ class MainWindow : public QMainWindow {
     // The remote view had the keyboard focus when a listing disabled it.
     bool remoteViewHadFocus_ = false;
     QString requestedRemotePath_;
+    // Shown with no timeout while a folder is listed; a successful listing
+    // removes it unless another message has replaced it.
+    QString remoteListingMessage_;
     bool activeRemoteListIsRefresh_ = false;
     bool activeRemoteListIsInitial_ = false;
     bool initialRemoteFallbackAttempted_ = false;
