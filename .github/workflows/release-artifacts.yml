@@ -420,6 +420,9 @@ jobs:
           ./scripts/package/appimage.sh
 
       - name: Build Snap
+        # The kde-neon-6 extension's Qt SDK snap, kde-qt6-core24-sdk, has no
+        # arm64 build in the Snap Store (checked 2026-11-28).
+        if: matrix.arch_name == 'x86_64'
         run: |
           sudo env "PATH=$PATH" ./scripts/package/snap.sh --destructive-mode
 
