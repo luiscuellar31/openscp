@@ -9,7 +9,7 @@ builds. Community builds may use different baselines.
 | Linux AppImage x86_64 | glibc 2.34+ | Built in a digest-pinned Rocky Linux 9 container; all bundled ELF objects are audited for `GLIBC_*` and `GLIBCXX_*`. |
 | Linux AppImage aarch64 | glibc 2.39+ (Ubuntu 24.04 baseline) | Built on the Ubuntu 24.04 arm64 runner and audited before upload. |
 | Native Linux source build | Ubuntu 22.04 toolchain and newer | CMake configure, hardening, build, and unit tests run on Ubuntu 22.04 in CI. Other distributions are community-supported. |
-| Snap (built in CI, not published yet) | `core24` plus the declared content runtime | Runtime-managed; it does not inherit the host's Qt or glibc in the same way as a native build. |
+| Snap x86_64 (built in CI, not published yet) | `core24` plus the declared content runtime | Runtime-managed; it does not inherit the host's Qt or glibc in the same way as a native build. |
 | Flatpak | Manifest's KDE runtime branch | Runtime-managed and independent of most host libraries. |
 | Windows setup and MSI (x64) | Windows 10 1809+ and Windows 11 | Built with MSVC against Qt 6.11.2 and the libraries vcpkg builds at a pinned baseline. Every staged binary is checked for ASLR and DEP, and `OpenSCP.exe` for Control Flow Guard and CET too; the release job installs both packages and starts OpenSCP, without the Qt SDK in reach, before upload. |
 
