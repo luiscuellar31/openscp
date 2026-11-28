@@ -57,7 +57,6 @@ class CurlClientState final {
         Operation &operator=(const Operation &) = delete;
         Operation(Operation &&other) noexcept;
         Operation &operator=(Operation &&) = delete;
-        ~Operation();
 
         [[nodiscard]] bool disconnecting() const noexcept;
         [[nodiscard]] std::atomic<bool> *interrupted() const noexcept;
@@ -116,7 +115,10 @@ class CurlClientState final {
                           std::unique_ptr<CurlEasySession> session,
                           std::string commandRoot = "/");
     void disconnect(SessionOptions defaultOptions);
+    // The interrupt lasts until clearInterrupt() or disconnect(), so one
+    // that arrives before or between operations still stops them.
     void requestInterrupt() noexcept;
+    void clearInterrupt() noexcept;
     [[nodiscard]] bool isConnected() const;
     [[nodiscard]] CurlConnectionSnapshot
     snapshot(const Operation &operation) const;
@@ -133,6 +135,13 @@ class CurlClientState final {
     std::atomic<bool> interrupted_{false};
     std::atomic<bool> disconnecting_{false};
 };
+
+// A libcurl string list that frees itself.
+using CurlSlist = std::unique_ptr<curl_slist, decltype(&curl_slist_free_all)>;
+
+// Appends `item` to `list`. When libcurl cannot, returns false and keeps the
+// list, which `list = curl_slist_append(list, item)` would lose.
+bool appendToCurlSlist(CurlSlist &list, const std::string &item);
 
 bool rejectInterrupted(const std::atomic<bool> *interrupted, std::string &err,
                        CURLcode *curlCodeOut = nullptr);
@@ -168,7 +177,9 @@ std::FILE *openFileForUpload(const std::string &path, std::uint64_t &fileSize,
 RemoteError errorFromCurl(CURLcode code, std::string message,
                           long responseCode = 0, bool commitUncertain = false);
 // Runs curl_easy_perform with an error buffer, so a failure can name its cause,
-// such as the TLS alert or the refused address.
+// such as the TLS alert or the refused address. A proxy that refuses the
+// credentials (407) gives CURLE_LOGIN_DENIED rather than libcurl's
+// CURLE_COULDNT_CONNECT, or CURLE_RECV_ERROR before libcurl 8.20.
 CURLcode performWithErrorDetail(CURL *curl, std::string &detail);
 // The curl_easy_strerror text, followed by the error-buffer detail when it adds
 // something.
@@ -214,6 +225,10 @@ bool configureTlsPolicy(CURL *curl, bool verifyPeer,
                         const char *minimumVersionError,
                         const char *verificationError, const char *caPathError,
                         std::string &err);
+
+// The first of `paths` that is a regular file, or an empty string. Linux finds
+// its system CA bundle this way.
+std::string firstExistingFile(std::initializer_list<std::string_view> paths);
 
 // The CURLOPT_PINNEDPUBLICKEY form of a PEM certificate's public key.
 bool publicKeyPinFromPem(std::string_view pem, std::string &pin);

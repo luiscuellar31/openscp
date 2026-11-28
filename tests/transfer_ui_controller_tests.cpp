@@ -40,14 +40,18 @@ OPENSCP_TEST(testCompletionIsNotRepeated, test) {
         completedUpload(1, QStringLiteral("/team/report.txt"))};
     const auto first =
         controller.observe(completion, {}, true, QStringLiteral("/team"));
-    test.check(first.scheduleRemoteRefresh,
-               "a completed upload in the visible folder should refresh it");
+    test.check(first.uploadsInRemoteRoot ==
+                       QStringList{QStringLiteral("/team/report.txt")} &&
+                   !first.scheduleRemoteRefresh,
+               "a completed upload in the visible folder should update its "
+               "row");
     test.check(!first.completionMessage.isEmpty(),
                "a newly completed transfer should produce one notification");
 
     const auto repeated =
         controller.observe(completion, {}, true, QStringLiteral("/team"));
     test.check(!repeated.scheduleRemoteRefresh &&
+                   repeated.uploadsInRemoteRoot.isEmpty() &&
                    repeated.completionMessage.isEmpty(),
                "unchanged terminal tasks should not repeat UI effects");
 }
@@ -58,7 +62,8 @@ OPENSCP_TEST(testRemoteRootBoundaries, test) {
         completedUpload(2, QStringLiteral("/teammate/report.txt"))};
     const auto update =
         controller.observe(tasks, {}, true, QStringLiteral("/team"));
-    test.check(!update.scheduleRemoteRefresh,
+    test.check(!update.scheduleRemoteRefresh &&
+                   update.uploadsInRemoteRoot.isEmpty(),
                "similar path prefixes must not cross directory boundaries");
 }
 
@@ -74,7 +79,8 @@ OPENSCP_TEST(testBatchNotification, test) {
     const auto update = controller.observe(tasks, {}, false, {});
     test.check(update.completionMessage.contains(QStringLiteral("2")),
                "simultaneous completions should be summarized once");
-    test.check(!update.scheduleRemoteRefresh,
+    test.check(!update.scheduleRemoteRefresh &&
+                   update.uploadsInRemoteRoot.isEmpty(),
                "local mode should not schedule a remote refresh");
 }
 
@@ -86,7 +92,7 @@ OPENSCP_TEST(testResetAllowsFreshSessionEffects, test) {
     controller.reset();
     const auto update =
         controller.observe(tasks, {}, true, QStringLiteral("/"));
-    test.check(update.scheduleRemoteRefresh &&
+    test.check(!update.uploadsInRemoteRoot.isEmpty() &&
                    !update.completionMessage.isEmpty(),
                "session reset should discard prior UI observation state");
 }
@@ -98,14 +104,14 @@ OPENSCP_TEST(testInitializationAndRemovalDeltas, test) {
     controller.initialize({completed});
     const auto unchanged =
         controller.observe({completed}, {}, true, QStringLiteral("/"));
-    test.check(!unchanged.scheduleRemoteRefresh &&
+    test.check(unchanged.uploadsInRemoteRoot.isEmpty() &&
                    unchanged.completionMessage.isEmpty(),
                "initial terminal tasks should not replay UI effects");
 
     (void)controller.observe({}, {completed.taskId}, true, QStringLiteral("/"));
     const auto reinserted =
         controller.observe({completed}, {}, true, QStringLiteral("/"));
-    test.check(reinserted.scheduleRemoteRefresh &&
+    test.check(!reinserted.uploadsInRemoteRoot.isEmpty() &&
                    !reinserted.completionMessage.isEmpty(),
                "removal deltas should release per-task observation state");
 }
@@ -125,22 +131,49 @@ OPENSCP_TEST(testFrequentDeltasStayIncremental, test) {
         const auto update =
             controller.observe({changing}, {}, true, QStringLiteral("/bulk"));
         test.check(update.completionMessage.isEmpty() &&
-                       !update.scheduleRemoteRefresh,
+                       update.uploadsInRemoteRoot.isEmpty(),
                    "non-terminal deltas should not produce UI effects");
     }
     changing.status = TransferTask::Status::Done;
     const auto completed =
         controller.observe({changing}, {}, true, QStringLiteral("/bulk"));
     test.check(
-        completed.scheduleRemoteRefresh &&
+        !completed.uploadsInRemoteRoot.isEmpty() &&
             !completed.completionMessage.isEmpty(),
         "one terminal delta should complete independently of queue size");
+}
+
+OPENSCP_TEST(testOnlyAnUploadThatAddsAFolderListsTheFolderAgain, test) {
+    // Every upload below the visible folder listed it again, which takes
+    // seconds for a large folder, though only one that adds a folder to it
+    // changes what it shows.
+    openscpui::TransferUiController controller;
+    const auto listed = [](const QString &name) {
+        return name == QStringLiteral("docs");
+    };
+    const auto intoListed = controller.observe(
+        {completedUpload(1, QStringLiteral("/team/docs/2026/report.txt"))}, {},
+        true, QStringLiteral("/team"), listed);
+    test.check(!intoListed.scheduleRemoteRefresh &&
+                   intoListed.uploadsInRemoteRoot.isEmpty(),
+               "an upload into a listed folder should change nothing shown");
+    const auto newFolder = controller.observe(
+        {completedUpload(2, QStringLiteral("/team/photos/beach.jpg"))}, {},
+        true, QStringLiteral("/team"), listed);
+    test.check(newFolder.scheduleRemoteRefresh &&
+                   newFolder.uploadsInRemoteRoot.isEmpty(),
+               "an upload that adds a folder should list the folder again");
+    const auto fromRoot = controller.observe(
+        {completedUpload(3, QStringLiteral("/docs/notes.txt"))}, {}, true,
+        QStringLiteral("/"), listed);
+    test.check(!fromRoot.scheduleRemoteRefresh,
+               "the top folder should apply the same rule");
 }
 
 OPENSCP_TEST(testDownloadOpenIntentFollowsTaskLifecycle, test) {
     openscpui::TransferUiController controller;
     const QString localPath = QStringLiteral("/local/report.txt");
-    controller.openDownloadWhenCompleted(20, localPath);
+    controller.openDownloadWhenCompleted(20);
 
     const auto running = controller.observe(
         {downloadWithStatus(20, localPath, TransferTask::Status::Running)}, {},
@@ -161,18 +194,31 @@ OPENSCP_TEST(testDownloadOpenIntentFollowsTaskLifecycle, test) {
                "a completed task must not request opening twice");
 }
 
+OPENSCP_TEST(testDownloadOpenIntentOpensTheFinalDestination, test) {
+    // "Rename" on a conflict downloads to "report (1).txt"; the requested
+    // path still holds the old copy.
+    openscpui::TransferUiController controller;
+    controller.openDownloadWhenCompleted(24);
+    const QString renamed = QStringLiteral("/local/report (1).txt");
+    const auto completed = controller.observe(
+        {downloadWithStatus(24, renamed, TransferTask::Status::Done)}, {},
+        false, {});
+    test.check(completed.completedDownloadPathsToOpen == QStringList{renamed},
+               "a renamed download should open where it was saved");
+}
+
 OPENSCP_TEST(testDownloadOpenIntentClearsOnFailureRemovalAndReset, test) {
     openscpui::TransferUiController controller;
     const QString localPath = QStringLiteral("/local/report.txt");
 
-    controller.openDownloadWhenCompleted(21, localPath);
+    controller.openDownloadWhenCompleted(21);
     const auto failed = controller.observe(
         {downloadWithStatus(21, localPath, TransferTask::Status::Error)}, {},
         false, {});
     test.check(failed.completedDownloadPathsToOpen.isEmpty(),
                "failed downloads must clear intent without opening");
 
-    controller.openDownloadWhenCompleted(22, localPath);
+    controller.openDownloadWhenCompleted(22);
     (void)controller.observe({}, {22}, false, {});
     const auto removedThenCompleted = controller.observe(
         {downloadWithStatus(22, localPath, TransferTask::Status::Done)}, {},
@@ -180,7 +226,7 @@ OPENSCP_TEST(testDownloadOpenIntentClearsOnFailureRemovalAndReset, test) {
     test.check(removedThenCompleted.completedDownloadPathsToOpen.isEmpty(),
                "removed tasks must release their pending open intent");
 
-    controller.openDownloadWhenCompleted(23, localPath);
+    controller.openDownloadWhenCompleted(23);
     controller.reset();
     const auto resetThenCompleted = controller.observe(
         {downloadWithStatus(23, localPath, TransferTask::Status::Done)}, {},

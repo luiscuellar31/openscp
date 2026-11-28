@@ -61,7 +61,6 @@ class SecretStore {
     // Store a secret under a logical key (e.g. "site-id:<uuid>:password").
     PersistResult setSecret(const QString &key,
                             const openscp::SecureString &value);
-    PersistResult setSecret(const QString &key, const QString &value);
 
     // Retrieve a secret if present.
     [[nodiscard]] LoadResult getSecret(const QString &key) const;

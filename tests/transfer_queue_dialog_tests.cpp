@@ -1,6 +1,7 @@
 // Transfer queue dialog tests: what the table shows as the queue changes.
 #include "QtTestSupport.hpp"
 #include "TestHarness.hpp"
+#include "logic/common/AppSettings.hpp"
 #include "logic/transfers/TransferManager.hpp"
 #include "widgets/dialogs/TransferQueueDialog.hpp"
 
@@ -13,8 +14,10 @@
 #include <QItemSelectionModel>
 #include <QLabel>
 #include <QPersistentModelIndex>
+#include <QPushButton>
 #include <QSortFilterProxyModel>
 #include <QTableView>
+#include <QTextDocumentFragment>
 
 #include <algorithm>
 #include <iostream>
@@ -33,6 +36,15 @@ QStringList destinations(const QAbstractItemModel *model) {
         result.push_back(
             model->index(row, kDestinationColumn).data().toString());
     return result;
+}
+
+QPushButton *pauseSelectedButton(const QWidget &dialog) {
+    for (auto *button : dialog.findChildren<QPushButton *>()) {
+        if (button->toolTip() ==
+            TransferQueueDialog::tr("Pause the selected transfers"))
+            return button;
+    }
+    return nullptr;
 }
 
 QString badgeText(const QWidget *dialog, const QString &objectName) {
@@ -165,6 +177,35 @@ OPENSCP_TEST(testQueueTableFollowsRemovedTasks, test) {
                "removing by id should not touch the other task");
 }
 
+OPENSCP_TEST(testToolTipsShowPathsAsText, test) {
+    // A server could word a name such as <img width=4000 height=4000> as
+    // markup in the tooltip of its row.
+    TransferManager manager;
+    manager.setSessionIdentity(QStringLiteral("test-session"));
+    TransferBatchOptions batch;
+    batch.sessionKey = QStringLiteral("test-session");
+    const QString path = QStringLiteral("/<b>x  y.dat");
+    manager.enqueueRemoteDelete(path, false, batch);
+
+    TransferQueueDialog dialog(&manager);
+    dialog.show();
+    flushUiEvents();
+    const auto *table =
+        dialog.findChild<QTableView *>(QStringLiteral("transferQueueTable"));
+    const bool listed =
+        table && table->model() && table->model()->rowCount() == 1;
+    test.check(listed, "the table should show the queued task");
+    if (!listed)
+        return;
+    const QString tip = table->model()
+                            ->index(0, kDestinationColumn)
+                            .data(Qt::ToolTipRole)
+                            .toString();
+    test.check(QTextDocumentFragment::fromHtml(tip).toPlainText() == path,
+               "the path should show as text in its tooltip: " +
+                   tip.toStdString());
+}
+
 OPENSCP_TEST(testSelectedActionsUseTaskSnapshots, test) {
     TransferManager manager;
     manager.setSessionIdentity(QStringLiteral("test-session"));
@@ -220,6 +261,70 @@ OPENSCP_TEST(testSelectedActionsUseTaskSnapshots, test) {
                    canceledLast->status == TransferTask::Status::Canceled &&
                    stillUntouched->status != TransferTask::Status::Canceled,
                "cancel should affect only selected tasks");
+}
+
+OPENSCP_TEST(testSelectedActionsComeFromTheTable, test) {
+    // The summary runs with every batch of progress. It takes the selected
+    // tasks from the table, never from the queue under the lock its workers
+    // hold, so a change the table has not heard of yet does not show.
+    TransferManager manager;
+    const quint64 id = manager.enqueueRemoteDelete(
+        QStringLiteral("/selected"), false, TransferBatchOptions{});
+    TransferQueueDialog dialog(&manager);
+    dialog.show();
+    flushUiEvents();
+    auto *table =
+        dialog.findChild<QTableView *>(QStringLiteral("transferQueueTable"));
+    QPushButton *pauseSelected = pauseSelectedButton(dialog);
+    test.check(table && table->model()->rowCount() == 1 && pauseSelected &&
+                   !pauseSelected->isEnabled(),
+               "the queued task should show, with nothing selected yet");
+    if (!table || !pauseSelected || table->model()->rowCount() != 1)
+        return;
+
+    manager.blockSignals(true);
+    manager.pauseTask(id);
+    table->selectionModel()->select(table->model()->index(0, 0),
+                                    QItemSelectionModel::Select |
+                                        QItemSelectionModel::Rows);
+    const bool pausable = pauseSelected->isEnabled();
+    manager.blockSignals(false);
+    test.check(pausable, "the actions of a selected task should follow the "
+                         "table, which still shows it queued");
+}
+
+OPENSCP_TEST(testSelectedActionsFollowAFilterThatHidesTheSelection, test) {
+    // A filter that hides every selected row empties the selection without
+    // a selection signal, so the summary must not keep the old selection.
+    TransferManager manager;
+    manager.enqueueRemoteDelete(QStringLiteral("/queued"), false,
+                                TransferBatchOptions{});
+    TransferQueueDialog dialog(&manager);
+    dialog.show();
+    flushUiEvents();
+    auto *table =
+        dialog.findChild<QTableView *>(QStringLiteral("transferQueueTable"));
+    QPushButton *pauseSelected = pauseSelectedButton(dialog);
+    test.check(table && table->model()->rowCount() == 1 && pauseSelected,
+               "the queued task should show");
+    if (!table || !pauseSelected || table->model()->rowCount() != 1)
+        return;
+    table->selectionModel()->select(table->model()->index(0, 0),
+                                    QItemSelectionModel::Select |
+                                        QItemSelectionModel::Rows);
+    test.check(pauseSelected->isEnabled(),
+               "selecting a queued task should let it be paused");
+
+    constexpr int kCompletedFilter = 3;
+    test.check(QMetaObject::invokeMethod(&dialog, "onFilterChanged",
+                                         Q_ARG(int, kCompletedFilter)),
+               "the filter should be changeable");
+    flushUiEvents();
+    test.check(table->model()->rowCount() == 0 &&
+                   !table->selectionModel()->hasSelection() &&
+                   !pauseSelected->isEnabled(),
+               "with the selected task filtered out, nothing is selected "
+               "and its actions should be disabled");
 }
 
 OPENSCP_TEST(testDiscontinuousRemovalPreservesIndexesAndSelection, test) {
@@ -347,6 +452,98 @@ OPENSCP_TEST(benchmarkDiscontinuousRemoval, test) {
     }
 }
 
+OPENSCP_TEST(testColumnsFitOnlyTheRowsOnScreen, test) {
+    // The columns that fit their content are measured after each change of a
+    // row. Measuring rows off screen, or a hidden window, costs about 20 ms
+    // per change once the history holds 1000 tasks.
+    constexpr int kNameColumn = 1;
+    constexpr int kLongRow = 150;
+    const QString longName(160, QLatin1Char('n'));
+    openscpui::AppSettings().remove(
+        openscpui::settingskeys::kTransferQueueHeaderState);
+    {
+        // Earlier versions saved Qt's default precision with the header.
+        TransferManager manager;
+        TransferQueueDialog dialog(&manager);
+        auto *header = dialog.findChild<QTableView *>()->horizontalHeader();
+        header->setResizeContentsPrecision(1000);
+        openscpui::AppSettings().setValue(
+            openscpui::settingskeys::kTransferQueueHeaderState,
+            header->saveState());
+    }
+
+    TransferManager manager;
+    TransferBatchOptions batch;
+    QVector<quint64> ids;
+    for (int row = 0; row < 200; ++row) {
+        const QString name =
+            row == kLongRow ? longName : QStringLiteral("row-%1").arg(row);
+        ids.push_back(
+            manager.enqueueRemoteDelete(QLatin1Char('/') + name, false, batch));
+    }
+    TransferQueueDialog dialog(&manager);
+    QMetaObject::invokeMethod(&dialog, "onFilterChanged", Q_ARG(int, 0));
+    auto *table = dialog.findChild<QTableView *>();
+    const int longWidth = table->fontMetrics().horizontalAdvance(longName);
+    flushUiEvents();
+    test.check(table->columnWidth(kNameColumn) < longWidth,
+               "a hidden queue should not measure its rows");
+
+    dialog.show();
+    flushUiEvents();
+    test.check(table->columnWidth(kNameColumn) < longWidth,
+               "a column should not fit a row off screen");
+
+    table->scrollTo(table->model()->index(kLongRow, kNameColumn),
+                    QAbstractItemView::PositionAtCenter);
+    manager.pauseTask(ids[kLongRow]);
+    flushUiEvents();
+    test.check(table->columnWidth(kNameColumn) >= longWidth,
+               "a column should fit the rows on screen");
+
+    dialog.hide();
+    table->scrollToTop();
+    dialog.show();
+    flushUiEvents();
+    test.check(table->columnWidth(kNameColumn) < longWidth,
+               "showing the queue again should fit the rows then on screen");
+
+    openscpui::AppSettings().remove(
+        openscpui::settingskeys::kTransferQueueHeaderState);
+}
+
+OPENSCP_TEST(benchmarkRowUpdates, test) {
+    if (!qEnvironmentVariableIsSet("OPENSCP_BENCH_QUEUE_MODEL"))
+        return;
+    TransferManager manager;
+    TransferBatchOptions batch;
+    QVector<quint64> ids;
+    for (int row = 0; row < 3000; ++row) {
+        ids.push_back(manager.enqueueRemoteDelete(
+            QStringLiteral("/benchmark-%1").arg(row), false, batch));
+    }
+    TransferQueueDialog dialog(&manager);
+    const auto *table = dialog.findChild<QTableView *>();
+    test.check(table && table->model()->rowCount() == 3000,
+               "the benchmark table should show every task");
+    for (const bool visible : {true, false}) {
+        dialog.setVisible(visible);
+        flushUiEvents();
+        constexpr int kUpdates = 100;
+        QElapsedTimer timer;
+        timer.start();
+        for (int update = 0; update < kUpdates; ++update) {
+            if (update % 2 == 0)
+                manager.pauseTask(ids.front());
+            else
+                manager.resumeTask(ids.front());
+            flushUiEvents();
+        }
+        std::cout << "BENCH row_update_3000_" << (visible ? "shown" : "hidden")
+                  << "_us=" << timer.nsecsElapsed() / 1000 / kUpdates << '\n';
+    }
+}
+
 OPENSCP_TEST(testBulkRemovalThroughSortedFilterAndFullClear, test) {
     TransferManager manager;
     TransferBatchOptions batch;
@@ -453,7 +650,7 @@ int main(int argc, char **argv) {
         return 1;
     }
     openscp::test::TestHarness harness("Transfer queue dialog");
-    const int result = harness.run();
+    const int result = harness.run(argc, argv);
     openscp::testsupport::drainThreadPool();
     return result;
 }

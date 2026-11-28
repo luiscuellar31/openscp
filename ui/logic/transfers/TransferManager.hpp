@@ -39,6 +39,11 @@ namespace openscp {
 class RemoteClient;
 }
 
+// The name a transfer takes to keep an existing entry, "name (N).ext", split
+// at the last dot. A name whose only dot starts it, such as ".bashrc", has no
+// extension.
+QString numberedFileName(const QString &filename, int suffix);
+
 class TransferManager : public QObject {
     Q_OBJECT
 
@@ -68,6 +73,10 @@ class TransferManager : public QObject {
     bool isShuttingDown() const { return shuttingDown_.load(); }
     void setSessionIdentity(const QString &sessionKey);
     QString sessionIdentity() const;
+    // The address of the current session's server, from downloadOriginUrl(),
+    // which Windows records on each file downloaded from it (the Mark of the
+    // Web).
+    void setDownloadOrigin(const QString &originUrl);
 
     void setMaxConcurrent(int maxConcurrent);
     int maxConcurrent() const { return maxConcurrent_.load(); }
@@ -163,18 +172,35 @@ class TransferManager : public QObject {
     static constexpr int kMaxTerminalHistory = 5000;
     static constexpr int kTerminalHistoryPruneBatch = kMaxTerminalHistory / 10;
     // A save waits for a pause in queue changes, but never longer than the
-    // deadline, so a busy queue is still saved regularly.
+    // deadline, so a busy queue is still saved regularly. Each save rewrites
+    // the whole queue, so the deadline grows by 1 ms per saved task above
+    // 2,000, up to kPersistenceMaxDeadlineMs.
     static constexpr int kPersistenceDelayMs = 250;
     static constexpr int kPersistenceDeadlineMs = 2000;
+    static constexpr int kPersistenceMaxDeadlineMs = 30000;
+    // A failed save is tried again after kPersistenceRetryMs, twice as long
+    // after each failure in a row, up to kPersistenceMaxRetryMs.
+    static constexpr int kPersistenceRetryMs = 5000;
+    static constexpr int kPersistenceMaxRetryMs = 5 * 60 * 1000;
 
     struct WorkerSlot;
-    enum class PrecheckOutcome { Continue, Skipped, Canceled, Error };
+    // LocalError: the local file system failed, not the server.
+    enum class PrecheckOutcome {
+        Continue,
+        Skipped,
+        Canceled,
+        Error,
+        LocalError
+    };
 
     ConnectionFactory openConnection_;
     // Stops the connections being opened for the current session; replaced
     // with each new one. Read and written under mtx_.
     std::stop_source connectionStop_;
     QString currentSessionKey_;
+    // The current session's server, recorded on Windows as the source of
+    // each downloaded file. Read and written under mtx_.
+    QString downloadOrigin_;
     // Sessions of this run whose uploads write the destination directly, so
     // a "<destination>.part" on their server is not an upload's.
     QSet<QString> sessionsWithoutUploadPartials_;
@@ -239,9 +265,13 @@ class TransferManager : public QObject {
     TransferAutoClearRule autoClearRule_;
 
     QTimer *persistenceTimer_ = nullptr;
+    QTimer *persistenceRetryTimer_ = nullptr;
     TransferQueueWriter persistenceWriter_;
     QString persistencePath_;
     qint64 persistencePendingSinceMs_ = 0;
+    // Tasks in the last snapshot handed to the writer; guarded by
+    // persistenceMutex_.
+    qsizetype persistedTaskCount_ = 0;
     // Fingerprint of the last snapshot handed to the writer; guarded by mtx_.
     std::optional<std::size_t> lastPersistedFingerprint_;
     bool persistenceEnabled_ = false;
@@ -293,6 +323,9 @@ class TransferManager : public QObject {
     void reserveCleanupSourceLocked(const TransferTask &task);
     void releaseTaskPathsLocked(quint64 taskId);
     bool dependencySatisfiedLocked(const TransferTask &task) const;
+    // A worker's task starts and ends running only through these two.
+    void markTaskRunningLocked(TransferTask &task, qint64 nowMs);
+    void releaseRunningTaskLocked(quint64 taskId);
     std::optional<TransferTask> pickRunnableTaskLocked(std::size_t slotIndex);
     void workerLoop(std::size_t slotIndex, std::stop_token stopToken);
     // connectionFailed is set when no connection could be opened, as opposed

@@ -42,10 +42,14 @@ class RemoteClient {
 
     virtual bool connect(const SessionOptions &opt, std::string &err) = 0;
     virtual void disconnect() = 0;
-    // Aborts the operation in progress; may be called from another thread. A
-    // backend that has to drop the connection to do so reports it through
-    // isConnected().
+    // Aborts the operation in progress, and those that follow until
+    // clearInterrupt(); may be called from another thread. A backend that has
+    // to drop the connection to do so reports it through isConnected().
     virtual void interrupt() {}
+    // Lets operations run again after interrupt(). Whoever starts work on the
+    // client calls it first, so an interrupt that arrives just before or
+    // between that work's operations still stops it.
+    virtual void clearInterrupt() {}
     virtual bool isConnected() const = 0;
 
     virtual bool list(const std::string &remote_path,

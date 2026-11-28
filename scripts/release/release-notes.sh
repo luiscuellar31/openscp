@@ -403,17 +403,25 @@ shasum -a 256 -c SHA256SUMS.txt --ignore-missing  # macOS
 sha256sum -c SHA256SUMS.txt --ignore-missing      # Linux
 \`\`\`
 
+On Windows, compare the hash that PowerShell prints with the file's line in \`SHA256SUMS.txt\`:
+
+\`\`\`powershell
+Get-FileHash -Algorithm SHA256 .\\OpenSCP-${VERSION}-x64-setup.exe
+\`\`\`
+
 Checksums catch a damaged download, not a replaced one. To confirm that a file was built by this repository's release workflow, use the [GitHub CLI](https://cli.github.com/):
 
 \`\`\`bash
 gh attestation verify OpenSCP-${VERSION}-x86_64.AppImage --repo luiscuellar31/openscp
 \`\`\`
 
+Any other attached file works the same way, such as \`OpenSCP-${VERSION}-x64-setup.exe\`.
+
 ### macOS
 
 Download \`OpenSCP-${VERSION}-arm64-UNSIGNED.dmg\` on Apple Silicon or \`OpenSCP-${VERSION}-x86_64-UNSIGNED.dmg\` on Intel, open it, and drag OpenSCP onto Applications.
 
-OpenSCP is not signed with an Apple Developer ID, so macOS blocks the first launch and reports that it cannot check the app for malicious software. To allow it, open **System Settings → Privacy & Security**, scroll down to the Security section, click **Open Anyway** next to the message about OpenSCP, and confirm. On macOS 12 and 13 the same setting lives in **System Preferences → Security & Privacy → General**. The DMG ships these steps as \`README.txt\`.
+OpenSCP is not signed with an Apple Developer ID, so macOS blocks the first launch and reports that it cannot check the app for malicious software. To allow it, open **System Settings → Privacy & Security**, scroll down to the Security section, click **Open Anyway** next to the message about OpenSCP, and confirm. The DMG ships these steps as \`README.txt\`.
 
 ### Linux
 
@@ -433,6 +441,12 @@ flatpak run io.github.luiscuellar31.openscp
 \`\`\`
 
 Replace \`x86_64\` with \`aarch64\` on ARM64 machines.
+
+### Windows
+
+Download \`OpenSCP-${VERSION}-x64-setup.exe\` and run it. It installs for the current user without administrator rights, offers an installation for all users, and updates itself. \`OpenSCP-${VERSION}-x64.msi\` installs for all users, for deployment tools such as Intune or Group Policy, and is updated by installing a newer MSI. Both need 64-bit Windows 10 version 1809 or later.
+
+OpenSCP is not code-signed, so SmartScreen may warn before the first run. To allow it, click **More info**, then **Run anyway**.
 
 </details>
 

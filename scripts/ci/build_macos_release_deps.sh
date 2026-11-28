@@ -9,8 +9,8 @@ source "${SCRIPT_DIR}/../lib/version.sh"
 # bottles target the runner that produced them, so they cannot be used when the
 # application advertises compatibility with an older macOS release.
 
-OPENSSL_VERSION="3.5.8"
-OPENSSL_SHA256="a8f84a39918ec6415ce765d9b429d313ba97b8143169c172e734b9514464f5b2"
+OPENSSL_VERSION="3.5.9"
+OPENSSL_SHA256="603f5602e2eef00d77fbd429d34dcd5822bb301757a1bc9cdb24c670f1eb859a"
 LIBSSH2_VERSION="1.11.1"
 LIBSSH2_SHA256="d9ec76cbe34db98eec3539fe2c899d26b0c837cb3eb466a56b0f109cabf658f7"
 TINYXML2_VERSION="11.0.0"

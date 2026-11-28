@@ -25,6 +25,7 @@
 #include <QPushButton>
 #include <QSortFilterProxyModel>
 #include <QTableView>
+#include <QTextDocument>
 #include <QThreadPool>
 #include <QTimer>
 #include <QVBoxLayout>
@@ -155,12 +156,16 @@ class SyncComparisonTableModel final : public QAbstractTableModel {
             }
         }
         if (role == Qt::ToolTipRole) {
-            return QStringLiteral("%1\n%2: %3\n%4: %5\n%6")
-                .arg(item.relativePath,
-                     QCoreApplication::translate("SyncDialog", "Source"),
-                     entryMetadataText(item.source),
-                     QCoreApplication::translate("SyncDialog", "Destination"),
-                     entryMetadataText(item.destination), item.reason);
+            // Names come from the servers: show them as text, not markup.
+            return Qt::convertFromPlainText(
+                QStringLiteral("%1\n%2: %3\n%4: %5\n%6")
+                    .arg(item.relativePath,
+                         QCoreApplication::translate("SyncDialog", "Source"),
+                         entryMetadataText(item.source),
+                         QCoreApplication::translate("SyncDialog",
+                                                     "Destination"),
+                         entryMetadataText(item.destination), item.reason),
+                Qt::WhiteSpacePre);
         }
         if (role == Qt::TextAlignmentRole && index.column() == ActionColumn) {
             return static_cast<int>(Qt::AlignCenter);
@@ -644,14 +649,12 @@ void SyncDialog::updateSummary() {
     QString bytesText = formatByteSize(knownBytes);
     if (unknownSizes > 0)
         bytesText += tr(" + unknown sizes");
-    summaryLabel_->setText(
-        tr("%1 files · %2 · %3 selected operations · %4 conflicts · %5 "
-           "unknown")
-            .arg(selectedCopies)
-            .arg(bytesText)
-            .arg(selectedChanges)
-            .arg(conflicts)
-            .arg(unknown));
+    summaryLabel_->setText(QStringList{
+        tr("%n files", nullptr, pluralCount(selectedCopies)), bytesText,
+        tr("%n selected operations", nullptr, pluralCount(selectedChanges)),
+        tr("%n conflicts", nullptr, pluralCount(conflicts)),
+        tr("%n unknown", nullptr, pluralCount(unknown))}
+                               .join(QStringLiteral(" · ")));
 }
 
 void SyncDialog::syncOptionsFromControls() {
@@ -860,9 +863,9 @@ void SyncDialog::acceptRequested() {
     if (plan.requiresMirrorConfirmation) {
         QMessageBox confirmation(
             QMessageBox::Warning, tr("Confirm mirror deletions"),
-            tr("Mirror will permanently delete %1 destination items shown "
-               "in the preview. Copies do not protect deleted extras.")
-                .arg(plan.deletes.size()),
+            tr("Mirror will permanently delete %n destination items shown "
+               "in the preview. Copies do not protect deleted extras.",
+               nullptr, pluralCount(plan.deletes.size())),
             QMessageBox::NoButton, this);
         QPushButton *executeButton = confirmation.addButton(
             tr("Execute mirror"), QMessageBox::AcceptRole);

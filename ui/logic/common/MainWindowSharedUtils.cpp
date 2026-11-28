@@ -1,15 +1,20 @@
 // Shared helper utilities for MainWindow split implementation files.
 #include "logic/common/MainWindowSharedUtils.hpp"
 
+#include "logic/common/LocalLinks.hpp"
 #include "logic/common/UiAlerts.hpp"
+#include "openscp/SafeLocalFile.hpp"
 
 #include <QCoreApplication>
+#include <QCursor>
 #include <QDir>
 #include <QDirIterator>
 #include <QFile>
 #include <QInputDialog>
 #include <QLineEdit>
+#include <QMenu>
 #include <QMessageBox>
+#include <QStorageInfo>
 #include <QUuid>
 
 #include <filesystem>
@@ -26,12 +31,12 @@ std::filesystem::path localFilesystemPath(const QString &path) {
 
 bool localEntryExists(const QString &path) {
     const QFileInfo info(path);
-    return info.exists() || info.isSymLink();
+    return info.exists() || isLocalLink(info);
 }
 
 bool renameEntry(const QString &from, const QString &to) {
     const QFileInfo info(from);
-    if (info.isDir() && !info.isSymLink())
+    if (info.isDir() && !isLocalLink(info))
         return QDir().rename(from, to);
     return QFile::rename(from, to);
 }
@@ -74,10 +79,11 @@ bool copyEntryToEmptyDestination(const QString &srcPath, const QString &dstPath,
     QFileInfo srcInfo(srcPath);
 
     // isFile() and isDir() follow links, so check for a link first.
-    if (srcInfo.isSymLink())
+    if (isLocalLink(srcInfo))
         return copyLink(srcPath, dstPath, error);
 
-    if (srcInfo.isFile()) {
+    // QFile::copy() copies a shortcut itself.
+    if (isLocalFile(srcInfo)) {
         QDir().mkpath(QFileInfo(dstPath).dir().absolutePath());
         if (!QFile::copy(srcPath, dstPath)) {
             error = QString(QCoreApplication::translate(
@@ -88,7 +94,7 @@ bool copyEntryToEmptyDestination(const QString &srcPath, const QString &dstPath,
         return true;
     }
 
-    if (srcInfo.isDir()) {
+    if (isLocalFolder(srcInfo)) {
         // Create destination directory
         if (!QDir().mkpath(dstPath)) {
             error = QString(QCoreApplication::translate(
@@ -112,11 +118,11 @@ bool copyEntryToEmptyDestination(const QString &srcPath, const QString &dstPath,
                 entryFileInfo.absoluteFilePath());
             const QString target = QDir(dstPath).filePath(relativePath);
 
-            if (entryFileInfo.isSymLink()) {
+            if (isLocalLink(entryFileInfo)) {
                 QDir().mkpath(QFileInfo(target).dir().absolutePath());
                 if (!copyLink(entryFileInfo.absoluteFilePath(), target, error))
                     return false;
-            } else if (entryFileInfo.isDir()) {
+            } else if (isLocalFolder(entryFileInfo)) {
                 if (!QDir().mkpath(target)) {
                     error =
                         QString(
@@ -126,7 +132,7 @@ bool copyEntryToEmptyDestination(const QString &srcPath, const QString &dstPath,
                             .arg(target);
                     return false;
                 }
-            } else if (entryFileInfo.isFile()) {
+            } else if (isLocalFile(entryFileInfo)) {
                 QDir().mkpath(QFileInfo(target).dir().absolutePath());
                 if (!QFile::copy(entryFileInfo.absoluteFilePath(), target)) {
                     error = QString(QCoreApplication::translate(
@@ -167,7 +173,40 @@ LocalRenameResult renameLocalEntry(const QString &sourcePath,
     return LocalRenameResult::Failed;
 }
 
+#ifdef Q_OS_WIN
+namespace {
+
+// Removes a tree one level at a time. symlink_status() reports a junction as
+// a junction, not a directory, and remove() deletes a link or junction
+// itself, and a read-only file too, so nothing outside the tree is touched.
+bool removeNativeTree(const std::filesystem::path &path) {
+    std::error_code error;
+    const auto status = std::filesystem::symlink_status(path, error);
+    if (status.type() == std::filesystem::file_type::not_found)
+        return true;
+    if (error)
+        return false;
+    bool removed = true;
+    if (status.type() == std::filesystem::file_type::directory) {
+        std::filesystem::directory_iterator entry(path, error);
+        for (; !error && entry != std::filesystem::directory_iterator();
+             entry.increment(error))
+            removed = removeNativeTree(entry->path()) && removed;
+        if (error)
+            return false;
+    }
+    std::filesystem::remove(path, error);
+    return removed && !error;
+}
+
+} // namespace
+#endif
+
 bool removeLocalEntry(const QString &path) {
+#ifdef Q_OS_WIN
+    // QDir::removeRecursively() descends into junctions.
+    return removeNativeTree(localFilesystemPath(path));
+#else
     const QFileInfo info(path);
     if (!info.exists() && !info.isSymLink())
         return true;
@@ -176,6 +215,7 @@ bool removeLocalEntry(const QString &path) {
     if (info.isDir() && !info.isSymLink())
         return QDir(path).removeRecursively();
     return QFile::remove(path);
+#endif
 }
 
 bool copyLocalEntry(const QString &srcPath, const QString &dstPath,
@@ -194,7 +234,7 @@ bool copyLocalEntry(const QString &srcPath, const QString &dstPath,
     // The staged copy would land inside the tree being copied and grow
     // without end.
     const QFileInfo srcInfo(srcPath);
-    if (srcInfo.isDir() && !srcInfo.isSymLink() &&
+    if (isLocalFolder(srcInfo) && !isLocalLink(srcInfo) &&
         isSameOrInside(destinationParent, srcPath)) {
         error =
             QString(QCoreApplication::translate(
@@ -326,6 +366,46 @@ bool PathDepthComparator::operator()(const QString &left,
     return deepestFirst ? left > right : left < right;
 }
 
+bool canGoUpLocally(const QString &path) {
+#ifdef Q_OS_WIN
+    (void)path;
+    return true;
+#else
+    QDir directory(path);
+    return directory.cdUp();
+#endif
+}
+
+QString chooseLocalDrive(QWidget *anchor, const QString &currentPath) {
+#ifdef Q_OS_WIN
+    QMenu menu(anchor);
+    const QString currentRoot = QStorageInfo(currentPath).rootPath();
+    for (const QStorageInfo &volume : QStorageInfo::mountedVolumes()) {
+        if (!volume.isValid() || !volume.isReady())
+            continue;
+        const QString root = volume.rootPath();
+        const QString drive = QDir::toNativeSeparators(root);
+        const QString name = volume.displayName();
+        QAction *action =
+            menu.addAction(name.isEmpty() || name == root
+                               ? drive
+                               : QStringLiteral("%1  %2").arg(drive, name));
+        action->setData(root);
+        action->setCheckable(true);
+        action->setChecked(root.compare(currentRoot, Qt::CaseInsensitive) == 0);
+    }
+    const QPoint position =
+        anchor ? anchor->mapToGlobal(QPoint(0, anchor->height()))
+               : QCursor::pos();
+    const QAction *chosen = menu.exec(position);
+    return chosen ? chosen->data().toString() : QString();
+#else
+    (void)anchor;
+    (void)currentPath;
+    return QString();
+#endif
+}
+
 bool isValidEntryName(const QString &name, QString *why) {
     if (name == "." || name == "..") {
         if (why) {
@@ -356,9 +436,30 @@ bool isValidEntryName(const QString &name, QString *why) {
     return true;
 }
 
+bool isValidLocalEntryName(const QString &name, QString *why) {
+    if (!isValidEntryName(name, why))
+        return false;
+    // A name a server accepts can still be impossible here. On Windows ':'
+    // opens an alternate data stream, CON or NUL a device, a final dot or
+    // space is dropped, and REPORT~1.TXT can be another file's short name, so
+    // the file would land elsewhere.
+    if (!openscp::localfiles::localNameProblem(name.toStdString()).empty()) {
+        if (why) {
+            *why = QCoreApplication::translate(
+                "MainWindow",
+                "Invalid name for this computer: Windows does not allow the "
+                "characters < > : \" | ? *, a final dot or space, or device "
+                "names such as CON, NUL or COM1, and can read a name such as "
+                "REPORT~1.TXT as another file's short name.");
+        }
+        return false;
+    }
+    return true;
+}
+
 bool promptValidEntryName(QWidget *parent, const QString &dialogTitle,
                           const QString &labelText, const QString &initialValue,
-                          QString &nameOut) {
+                          QString &nameOut, EntryNameTarget target) {
     bool inputAccepted = false;
     const QString candidateName =
         QInputDialog::getText(parent, dialogTitle, labelText, QLineEdit::Normal,
@@ -367,7 +468,11 @@ bool promptValidEntryName(QWidget *parent, const QString &dialogTitle,
         return false;
 
     QString invalidReason;
-    if (!isValidEntryName(candidateName, &invalidReason)) {
+    const bool valid =
+        target == EntryNameTarget::Local
+            ? isValidLocalEntryName(candidateName, &invalidReason)
+            : isValidEntryName(candidateName, &invalidReason);
+    if (!valid) {
         UiAlerts::warning(
             parent, QCoreApplication::translate("MainWindow", "Invalid name"),
             invalidReason);
@@ -375,6 +480,31 @@ bool promptValidEntryName(QWidget *parent, const QString &dialogTitle,
     }
     nameOut = candidateName;
     return true;
+}
+
+QString leftOutSummary(const LeftOutEntries &leftOut) {
+    QStringList parts;
+    if (leftOut.invalidNames > 0) {
+        parts << QCoreApplication::translate("MainWindow",
+                                             "Skipped invalid: %1")
+                     .arg(leftOut.invalidNames);
+    }
+    if (leftOut.unlistedFolders > 0) {
+        parts << QCoreApplication::translate("MainWindow",
+                                             "Folders not listed: %1")
+                     .arg(leftOut.unlistedFolders);
+    }
+    if (leftOut.skippedLinks > 0) {
+        parts << QCoreApplication::translate("MainWindow",
+                                             "Symbolic links skipped: %1")
+                     .arg(leftOut.skippedLinks);
+    }
+    if (leftOut.depthLimits > 0) {
+        parts << QCoreApplication::translate("MainWindow",
+                                             "Depth limits reached: %1")
+                     .arg(leftOut.depthLimits);
+    }
+    return parts.join(QStringLiteral("  |  "));
 }
 
 QString shortRemoteError(const QString &raw, const QString &fallback) {
@@ -444,15 +574,27 @@ QVector<QPair<QString, QString>> buildLocalDestinationPairsWithOverwritePrompt(
     for (const QFileInfo &sourceInfo : sources) {
         const QString targetPath =
             destinationDir.filePath(sourceInfo.fileName());
-        if (QFileInfo::exists(targetPath)) {
+        const QFileInfo targetInfo(targetPath);
+        if (targetInfo.exists()) {
             if (policy == OverwritePolicy::Ask) {
+                // The copy replaces a folder whole, so its own files go.
+                const bool folder =
+                    !isLocalLink(targetInfo) && isLocalFolder(targetInfo);
+                const QString text =
+                    folder ? QCoreApplication::translate(
+                                 "MainWindow",
+                                 "The folder “%1” already exists at "
+                                 "destination. Overwriting replaces it, and "
+                                 "deletes the files that only it holds.\n"
+                                 "Overwrite?")
+                           : QCoreApplication::translate(
+                                 "MainWindow",
+                                 "“%1” already exists at destination.\n"
+                                 "Overwrite?");
                 const auto decision = UiAlerts::question(
                     parent,
                     QCoreApplication::translate("MainWindow", "Conflict"),
-                    QCoreApplication::translate(
-                        "MainWindow",
-                        "“%1” already exists at destination.\nOverwrite?")
-                        .arg(sourceInfo.fileName()),
+                    text.arg(sourceInfo.fileName()),
                     QMessageBox::Yes | QMessageBox::No | QMessageBox::YesToAll |
                         QMessageBox::NoToAll);
                 if (decision == QMessageBox::YesToAll)

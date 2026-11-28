@@ -65,6 +65,11 @@ class SyncCoordinator final : public QObject {
     void cancelChecksums();
     bool isCalculatingChecksums() const;
 
+    // Gives each entry with a checksum on both sides its own side's one.
+    static void applyChecksums(const SyncChecksumResult &result,
+                               QVector<SyncSnapshotEntry> &localSnapshot,
+                               QVector<SyncSnapshotEntry> &remoteSnapshot);
+
     // Enqueues a complete execution plan as one persistent, ordered batch.
     // Returns its batch ID, or zero when no work was accepted.
     quint64 enqueuePlan(const SyncExecutionPlan &plan, const QString &localRoot,

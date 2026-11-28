@@ -1,9 +1,11 @@
 // Transfer queue tests without an external test framework.
+#include "PlatformTestSupport.hpp"
 #include "QtTestSupport.hpp"
 #include "TestHarness.hpp"
 #include "common/UniqueFile.hpp"
 #include "logic/transfers/BandwidthLimiter.hpp"
 #include "logic/transfers/ConflictCoordinator.hpp"
+#include "logic/transfers/MarkOfTheWeb.hpp"
 #include "logic/transfers/TransferManager.hpp"
 #include "logic/transfers/TransferQueuePersistence.hpp"
 #include "logic/transfers/TransferQueueWriter.hpp"
@@ -13,6 +15,7 @@
 
 #include <QCoreApplication>
 #include <QDateTime>
+#include <QDir>
 #include <QFile>
 #include <QFileDevice>
 #include <QFileInfo>
@@ -26,6 +29,8 @@
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <future>
+#include <iterator>
 #include <memory>
 #include <mutex>
 #include <stdexcept>
@@ -34,15 +39,23 @@
 #include <utility>
 #include <vector>
 
+#ifdef Q_OS_WIN
+// clang-format off
+#include <windows.h>
+#include <urlmon.h>
+// clang-format on
+#endif
+
 struct TransferManagerTestAccess {
     // A task whose worker is still finishing it after a failed connection
     // suspended the queue.
     static void markActiveAndWaiting(TransferManager &manager, quint64 taskId) {
         std::lock_guard<std::mutex> lock(manager.mtx_);
         TransferTask *task = manager.taskForIdLocked(taskId);
+        manager.markTaskRunningLocked(*task,
+                                      QDateTime::currentMSecsSinceEpoch());
         manager.setTaskStatusLocked(*task,
                                     TransferTask::Status::WaitingForConnection);
-        manager.activeTaskIds_.insert(taskId);
         manager.connectionSuspended_ = true;
     }
 
@@ -115,11 +128,8 @@ struct TransferManagerTestAccess {
 
     static void markActive(TransferManager &manager, quint64 taskId) {
         std::lock_guard<std::mutex> lock(manager.mtx_);
-        auto &task = *manager.taskForIdLocked(taskId);
-        manager.setTaskStatusLocked(task, TransferTask::Status::Running);
-        manager.activeTaskIds_.insert(taskId);
-        manager.taskControls_.startRunning(taskId, task.speedLimitKBps);
-        manager.running_.fetch_add(1);
+        manager.markTaskRunningLocked(*manager.taskForIdLocked(taskId),
+                                      QDateTime::currentMSecsSinceEpoch());
     }
 
     static void markDone(TransferManager &manager, quint64 taskId) {
@@ -186,10 +196,7 @@ struct TransferManagerTestAccess {
             const auto selected = manager.pickRunnableTaskLocked(0);
             if (!selected)
                 break;
-            manager.releaseTaskPathsLocked(selected->taskId);
-            manager.activeTaskIds_.erase(selected->taskId);
-            manager.taskControls_.finishRunning(selected->taskId);
-            manager.running_.fetch_sub(1);
+            manager.releaseRunningTaskLocked(selected->taskId);
             auto *stored = manager.taskForIdLocked(selected->taskId);
             manager.setTaskStatusLocked(*stored, TransferTask::Status::Queued);
         }
@@ -226,10 +233,7 @@ struct TransferManagerTestAccess {
             }
             // Requeue outside the timed region so availability remains stable.
             if (selected) {
-                manager.releaseTaskPathsLocked(selected->taskId);
-                manager.activeTaskIds_.erase(selected->taskId);
-                manager.taskControls_.finishRunning(selected->taskId);
-                manager.running_.fetch_sub(1);
+                manager.releaseRunningTaskLocked(selected->taskId);
                 manager.setTaskStatusLocked(
                     *manager.taskForIdLocked(selected->taskId),
                     TransferTask::Status::Queued);
@@ -447,6 +451,43 @@ OPENSCP_TEST(testConcurrentConflictsUseOneBatchResolution, test) {
         "the one batch decision should resolve every concurrent conflict");
     test.check(coordinator.batchPolicy(batchId) == TransferConflictPolicy::Skip,
                "apply-to-remaining should persist the selected batch policy");
+}
+
+OPENSCP_TEST(testBatchPolicyDoesNotWaitForAPrompt, test) {
+    // A prompt keeps its batch while the user decides. Reading or setting the
+    // batch's policy waited for it, and the queue does that under its own
+    // lock, which the prompt's cancel check takes: the queue could freeze.
+    ConflictCoordinator coordinator;
+    constexpr std::uint64_t batchId = 45;
+    std::promise<void> asked;
+    std::promise<void> answer;
+    const std::shared_future<void> answered = answer.get_future().share();
+    std::thread worker([&] {
+        ConflictRequest request;
+        request.batchId = batchId;
+        (void)coordinator.resolve(
+            request, TransferConflictPolicy::Ask, [&](const ConflictRequest &) {
+                asked.set_value();
+                answered.wait();
+                return ConflictResolution{TransferConflictPolicy::Skip};
+            });
+    });
+    const bool prompted =
+        asked.get_future().wait_for(2s) == std::future_status::ready;
+    auto policy = std::async(std::launch::async, [&] {
+        coordinator.ensureBatchPolicy(batchId,
+                                      TransferConflictPolicy::Overwrite);
+        return coordinator.batchPolicy(batchId);
+    });
+    const bool returned = policy.wait_for(2s) == std::future_status::ready;
+    answer.set_value();
+    worker.join();
+
+    test.check(prompted, "the conflict should reach its prompt");
+    test.check(returned,
+               "the batch policy should be reachable while a prompt is open");
+    test.check(policy.get() == TransferConflictPolicy::Ask,
+               "a batch that is asking keeps Ask until the user decides");
 }
 
 OPENSCP_TEST(testMixedTaskBatchEnqueue, test) {
@@ -1062,6 +1103,156 @@ OPENSCP_TEST(testDownloadTimeComesFromTheTransfer, test) {
     manager.shutdown();
 }
 
+OPENSCP_TEST(testDownloadOriginsNameTheServerOnly, test) {
+    openscp::SessionOptions options;
+    options.protocol = openscp::Protocol::Sftp;
+    options.host = "files.example";
+    options.port = 2222;
+    options.username = "alice";
+    options.password = "never-in-an-origin";
+    test.check(openscpui::downloadOriginUrl(options) ==
+                   QStringLiteral("sftp://files.example:2222/"),
+               "an origin should hold the scheme, host and port, and no "
+               "credentials");
+
+    options.protocol = openscp::Protocol::WebDav;
+    options.webdav_scheme = openscp::WebDavScheme::Http;
+    options.host = "m\xc3\xbcnchen.example";
+    options.port = 8080;
+    test.check(openscpui::downloadOriginUrl(options) ==
+                   QStringLiteral("http://xn--mnchen-3ya.example:8080/"),
+               "an internationalized host should take its ASCII form");
+
+    options.protocol = openscp::Protocol::Ftps;
+    options.host = "2001:db8::1";
+    options.port = 990;
+    test.check(openscpui::downloadOriginUrl(options) ==
+                   QStringLiteral("ftps://[2001:db8::1]:990/"),
+               "an IPv6 address should be bracketed");
+}
+
+#ifdef Q_OS_WIN
+// Reads the mark through the \\?\ form, which also reaches paths past
+// MAX_PATH; path is absolute, as QTemporaryDir gives it.
+std::string zoneIdentifierOf(const QString &path) {
+    std::ifstream stream(
+        std::filesystem::path(L"\\\\?\\" +
+                              QDir::toNativeSeparators(path).toStdWString() +
+                              L":Zone.Identifier"),
+        std::ios::binary);
+    return std::string(std::istreambuf_iterator<char>(stream),
+                       std::istreambuf_iterator<char>());
+}
+
+// Why this machine shows no Mark of the Web with zone 3 for files from
+// originUrl saved in folder, or an empty string. markDownloadedFile() rightly
+// writes none under a policy that keeps Windows from saving zone information,
+// on a volume without alternate streams, or for a server that Internet
+// Options map below the Internet zone, and another zone changes the ZoneId.
+std::string markOfTheWebUnavailable(const QString &folder,
+                                    const QString &originUrl) {
+    for (HKEY root : {HKEY_LOCAL_MACHINE, HKEY_CURRENT_USER}) {
+        DWORD value = 0;
+        DWORD size = sizeof(value);
+        if (::RegGetValueW(root,
+                           L"Software\\Microsoft\\Windows\\CurrentVersion\\"
+                           L"Policies\\Attachments",
+                           L"SaveZoneInformation", RRF_RT_REG_DWORD, nullptr,
+                           &value, &size) == ERROR_SUCCESS &&
+            value == 1)
+            return "a policy keeps Windows from saving zone information";
+    }
+    const std::wstring volume =
+        std::filesystem::path(QDir::toNativeSeparators(folder).toStdWString())
+            .root_path()
+            .wstring();
+    DWORD volumeFlags = 0;
+    if (!::GetVolumeInformationW(volume.c_str(), nullptr, 0, nullptr, nullptr,
+                                 &volumeFlags, nullptr, 0) ||
+        (volumeFlags & FILE_NAMED_STREAMS) == 0)
+        return "the temporary folder's volume keeps no alternate streams";
+    const HRESULT com = ::CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+    DWORD zone = URLZONE_INTERNET;
+    IInternetSecurityManager *manager = nullptr;
+    if (SUCCEEDED(::CoInternetCreateSecurityManager(nullptr, &manager, 0))) {
+        (void)manager->MapUrlToZone(
+            reinterpret_cast<const wchar_t *>(originUrl.utf16()), &zone, 0);
+        manager->Release();
+    }
+    if (SUCCEEDED(com))
+        ::CoUninitialize();
+    if (zone != URLZONE_INTERNET)
+        return "Internet Options map the test server to zone " +
+               std::to_string(zone);
+    return {};
+}
+
+OPENSCP_TEST(testWindowsDownloadsCarryTheMarkOfTheWeb, test) {
+    auto stats = std::make_shared<std::atomic<int>>(0);
+    TimedDownloadClient baseClient(stats);
+    TransferManager manager;
+    configureManager(manager, baseClient, testOptions());
+    QTemporaryDir destination;
+
+    const QString unmarked = destination.filePath(QStringLiteral("plain.txt"));
+    const quint64 first =
+        manager.enqueueDownload(QStringLiteral("/remote/plain.txt"), unmarked);
+    test.check(waitForStatus(manager, first, TransferTask::Status::Done),
+               "the first download should complete");
+    test.check(zoneIdentifierOf(unmarked).empty(),
+               "a download without an origin should stay unmarked");
+
+    const QString origin = QStringLiteral("sftp://files.example:2222/");
+    const std::string unavailable =
+        markOfTheWebUnavailable(destination.path(), origin);
+    if (!unavailable.empty()) {
+        test.skip("Mark of the Web: " + unavailable);
+        manager.shutdown();
+        return;
+    }
+    manager.setDownloadOrigin(origin);
+    const QString marked = destination.filePath(QStringLiteral("marked.txt"));
+    const quint64 second =
+        manager.enqueueDownload(QStringLiteral("/remote/marked.txt"), marked);
+    test.check(waitForStatus(manager, second, TransferTask::Status::Done),
+               "the second download should complete");
+    const std::string mark = zoneIdentifierOf(marked);
+    test.check(mark.find("ZoneId=3") != std::string::npos &&
+                   mark.find("HostUrl=sftp://files.example:2222/") !=
+                       std::string::npos,
+               "a download from an internet server should carry its zone "
+               "and origin: " +
+                   mark);
+    manager.shutdown();
+}
+
+OPENSCP_TEST(testWindowsMarkOfTheWebReachesPathsPastMaxPath, test) {
+    QTemporaryDir destination;
+    const QString origin = QStringLiteral("sftp://files.example:2222/");
+    const std::string unavailable =
+        markOfTheWebUnavailable(destination.path(), origin);
+    if (!unavailable.empty()) {
+        test.skip("Mark of the Web: " + unavailable);
+        return;
+    }
+    // Qt reaches paths past MAX_PATH by itself; the mark's stream, named
+    // after the file, must reach them too.
+    QString folder = destination.path();
+    while (folder.size() <= MAX_PATH)
+        folder += QLatin1Char('/') + QString(40, QLatin1Char('d'));
+    const QString file = folder + QStringLiteral("/marked.txt");
+    QFile written(file);
+    test.check(QDir().mkpath(folder) && written.open(QIODevice::WriteOnly) &&
+                   written.write("data") == 4,
+               "the long file should be written");
+    written.close();
+    openscpui::markDownloadedFile(file, origin);
+    const std::string mark = zoneIdentifierOf(file);
+    test.check(mark.find("ZoneId=3") != std::string::npos,
+               "a file past MAX_PATH should carry the mark: " + mark);
+}
+#endif
+
 OPENSCP_TEST(testIdleWorkersCloseTheirConnections, test) {
     auto probe = std::make_shared<IdleConnectionProbe>();
     IdleConnectionClient baseClient(probe);
@@ -1181,6 +1372,42 @@ OPENSCP_TEST(testLeavingASessionStopsWorkersStillConnecting, test) {
     }
 }
 
+OPENSCP_TEST(testFailedQueueSaveIsRetriedWithoutAChange, test) {
+    // The snapshot counted as saved once handed to the writer, so after a
+    // failed save, as when an antivirus holds the file on Windows, the queue
+    // was not written again until it changed.
+    QTemporaryDir directory;
+    const QString blocker = directory.filePath(QStringLiteral("blocker"));
+    {
+        QFile file(blocker);
+        test.check(file.open(QIODevice::WriteOnly),
+                   "a file should take the folder's place");
+    }
+    const QString path = QDir(blocker).filePath(QStringLiteral("queue.json"));
+    TransferManager manager;
+    manager.setSessionIdentity(QStringLiteral("test-session"));
+    test.check(manager.enablePersistence(path),
+               "persistence should be enabled");
+    int warnings = 0;
+    QObject::connect(&manager, &TransferManager::persistenceWarning, &manager,
+                     [&warnings] { ++warnings; });
+    manager.enqueueDownload(QStringLiteral("/remote/file"),
+                            directory.filePath(QStringLiteral("file")));
+    test.check(waitUntil([&] { return warnings > 0; }),
+               "the save should fail while a file takes the folder's place");
+
+    test.check(QFile::remove(blocker) && QDir().mkpath(blocker),
+               "the folder should become writable");
+    test.check(waitUntil(
+                   [&] {
+                       return TransferQueuePersistence::load(
+                                  path, QStringLiteral("test-session"))
+                                  .tasks.size() == 1;
+                   },
+                   std::chrono::milliseconds(10000)),
+               "the queue should be saved again without changing");
+}
+
 OPENSCP_TEST(testStatusChangesAloneDoNotRewriteTheQueue, test) {
     QTemporaryDir directory;
     const QString path = directory.filePath(QStringLiteral("queue.json"));
@@ -1215,8 +1442,82 @@ OPENSCP_TEST(testStatusChangesAloneDoNotRewriteTheQueue, test) {
                "a status change alone should not rewrite the queue");
 
     manager.removeTasks({ids[1]});
-    test.check(waitUntil([&] { return savedTasks() == 2; }),
+    // On Windows, reading the queue while the manager replaces it makes the
+    // replacement fail and retry, so the file is read only now and then.
+    test.check(waitUntil([&] {
+                   std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                   return savedTasks() == 2;
+               }),
                "removing a task should still be saved");
+}
+
+OPENSCP_TEST(testALargeQueueThatKeepsChangingIsSavedLessOften, test) {
+    // Each save rewrites the whole queue, so saving a queue of tens of
+    // thousands of tasks every two seconds wrote megabytes every second.
+    QTemporaryDir directory;
+    const QString path = directory.filePath(QStringLiteral("queue.json"));
+    TransferManager manager;
+    manager.setSessionIdentity(QStringLiteral("test-session"));
+    test.check(manager.enablePersistence(path),
+               "persistence should be enabled");
+    // Six seconds between saves.
+    constexpr int kTasks = 6000;
+    QVector<QPair<QString, QString>> downloads;
+    downloads.reserve(kTasks);
+    for (int index = 0; index < kTasks; ++index) {
+        downloads.push_back(
+            {QStringLiteral("/remote/file-%1").arg(index),
+             directory.filePath(QStringLiteral("file-%1").arg(index))});
+    }
+    manager.enqueueDownloads(downloads, testBatchOptions());
+    test.check(waitUntil(
+                   [&] {
+                       std::this_thread::sleep_for(
+                           std::chrono::milliseconds(100));
+                       return TransferQueuePersistence::load(
+                                  path, QStringLiteral("test-session"))
+                                  .tasks.size() == kTasks;
+                   },
+                   std::chrono::milliseconds(15000)),
+               "the queue should be saved");
+    const auto writtenAt = [&path] {
+        std::error_code error;
+        return std::filesystem::last_write_time(
+            QFile::encodeName(path).toStdString(), error);
+    };
+    const auto firstWrite = writtenAt();
+
+    // A speed limit is saved, so each one is a change that needs a save.
+    // They come every 25 ms, well within the 250 ms pause that would save the
+    // queue even with the larger deadline.
+    const quint64 changing = manager.tasksSnapshot().front().taskId;
+    const auto until =
+        std::chrono::steady_clock::now() + std::chrono::seconds(3);
+    bool rewritten = false;
+    for (int limit = 1; !rewritten && std::chrono::steady_clock::now() < until;
+         ++limit) {
+        manager.setTaskSpeedLimit(changing, limit);
+        rewritten = waitUntil([&] { return writtenAt() != firstWrite; },
+                              std::chrono::milliseconds(25));
+    }
+    test.check(!rewritten,
+               "a large queue that keeps changing should not be rewritten "
+               "every two seconds");
+}
+
+OPENSCP_TEST(testTasksTheTestsStartLookStartedByAWorker, test) {
+    // The test access starts tasks through the scheduler's own transition,
+    // so the tests never see a running task that production cannot make.
+    TransferManager manager;
+    const quint64 id = manager.enqueueRemoteDelete(QStringLiteral("/started"),
+                                                   false, testBatchOptions());
+    TransferManagerTestAccess::markActive(manager, id);
+    const auto task = manager.taskSnapshot(id);
+    test.check(task && task->status == TransferTask::Status::Running &&
+                   task->startedAtMs > 0,
+               "a task the tests start should have its start time, as one a "
+               "worker starts does");
+    TransferManagerTestAccess::finishActive(manager, id);
 }
 
 OPENSCP_TEST(testResumeDuringAFailedConnectionRequeuesTheTask, test) {
@@ -1355,6 +1656,121 @@ OPENSCP_TEST(testCanceledWorkerInvalidatesItsConnection, test) {
                "the task after cancellation must use a fresh connection");
 }
 
+struct LeftoverInterruptProbe {
+    std::atomic<bool> interrupted{false};
+    std::atomic<int> connections{0};
+};
+
+class LeftoverInterruptClient final : public DownloadMockClient {
+    public:
+    explicit LeftoverInterruptClient(
+        std::shared_ptr<LeftoverInterruptProbe> probe)
+        : probe_(std::move(probe)) {}
+
+    // Like the curl backends, an interrupt lasts until it is cleared.
+    void interrupt() override { probe_->interrupted.store(true); }
+    void clearInterrupt() override { probe_->interrupted.store(false); }
+
+    bool get(const std::string &remote, const std::string &, std::string &err,
+             std::function<void(std::size_t, std::size_t)> progress,
+             std::function<bool()>, bool) override {
+        if (probe_->interrupted.load()) {
+            err = "Interrupted";
+            setLastOperationError(openscp::RemoteErrorKind::Canceled, err);
+            return false;
+        }
+        if (progress)
+            progress(1, 1);
+        // A cancel that reaches the first download just as it ends.
+        if (remote == "/remote/first")
+            interrupt();
+        clearLastOperationError();
+        err.clear();
+        return true;
+    }
+
+    std::unique_ptr<openscp::RemoteClient>
+    openConnection(const openscp::SessionOptions &options, std::string &err) {
+        probe_->connections.fetch_add(1);
+        return makeConnectedWorker<LeftoverInterruptClient>(options, err,
+                                                            probe_);
+    }
+
+    private:
+    std::shared_ptr<LeftoverInterruptProbe> probe_;
+};
+
+OPENSCP_TEST(testLeftoverInterruptDoesNotStopTheNextTask, test) {
+    auto probe = std::make_shared<LeftoverInterruptProbe>();
+    LeftoverInterruptClient baseClient(probe);
+    TransferManager manager;
+    manager.setMaxConcurrent(1);
+    configureManager(manager, baseClient, testOptions());
+    QTemporaryDir destination;
+    auto batch = testBatchOptions();
+
+    const quint64 firstId = manager.enqueueDownload(
+        QStringLiteral("/remote/first"), destination.filePath("first"), batch);
+    const quint64 secondId =
+        manager.enqueueDownload(QStringLiteral("/remote/second"),
+                                destination.filePath("second"), batch);
+    test.check(waitForStatus(manager, firstId, TransferTask::Status::Done),
+               "the first download should finish");
+    test.check(waitForStatus(manager, secondId, TransferTask::Status::Done) &&
+                   probe->connections.load() == 1,
+               "the next task on that connection should not inherit an "
+               "interrupt left by the first");
+}
+
+class StaleErrorClient final : public DownloadMockClient {
+    public:
+    bool connect(const openscp::SessionOptions &options,
+                 std::string &err) override {
+        if (!DownloadMockClient::connect(options, err))
+            return false;
+        // The last error of an earlier task: transient, from a server that
+        // asked to wait before the next try.
+        setLastOperationError(openscp::RemoteErrorKind::RemoteIo, "busy", 0,
+                              true, false, 1);
+        return true;
+    }
+
+    std::unique_ptr<openscp::RemoteClient>
+    openConnection(const openscp::SessionOptions &options, std::string &err) {
+        return makeConnectedWorker<StaleErrorClient>(options, err);
+    }
+};
+
+OPENSCP_TEST(testLocalFailuresIgnoreTheConnectionsLastError, test) {
+    // A local failure took the worker connection's last remote error, so one
+    // that an earlier task left transient retried it, waiting as long as
+    // that server's Retry-After asked.
+    StaleErrorClient baseClient;
+    TransferManager manager;
+    manager.setMaxConcurrent(1);
+    configureManager(manager, baseClient, testOptions());
+    QTemporaryDir root;
+    // A file where a folder should be, so nothing can be made under it.
+    QFile blocker(root.filePath("blocker"));
+    test.check(blocker.open(QIODevice::WriteOnly),
+               "the blocking file should be created");
+    blocker.close();
+    auto batch = testBatchOptions();
+    const quint64 folderId =
+        manager.enqueueLocalDirectory(root.filePath("blocker/folder"), batch);
+    const quint64 downloadId = manager.enqueueDownload(
+        QStringLiteral("/remote/file"), root.filePath("blocker/file"), batch);
+    test.check(
+        waitForStatus(manager, folderId, TransferTask::Status::Error) &&
+            waitForStatus(manager, downloadId, TransferTask::Status::Error),
+        "both local failures should end in an error");
+    const auto folder = manager.taskSnapshot(folderId);
+    const auto download = manager.taskSnapshot(downloadId);
+    test.check(folder && folder->attempts == 1 && download &&
+                   download->attempts == 1,
+               "a local failure should not be retried");
+}
+
 OPENSCP_TEST(testClearSessionInvalidatesWorkerConnections, test) {
     auto probe = std::make_shared<LifecycleProbe>();
     CancelLifecycleClient baseClient(probe);
@@ -1463,6 +1879,227 @@ OPENSCP_TEST(testReconnectingResumesWorkThatWaitedForTheConnection, test) {
                    waitForStatus(manager, queued, TransferTask::Status::Done),
                "reconnecting should finish the work that waited, including "
                "the download the disconnect stopped");
+}
+
+struct ResumeProbe {
+    // How the first run ends after writing part of the file: None waits
+    // until it is stopped.
+    openscp::RemoteErrorKind failure = openscp::RemoteErrorKind::None;
+    bool transient = false;
+    // Runs after the first that fail with laterFailure before they report
+    // any progress.
+    std::atomic<int> runsThatMoveNothing{0};
+    openscp::RemoteErrorKind laterFailure = openscp::RemoteErrorKind::LocalIo;
+    std::atomic<int> gets{0};
+    std::atomic<bool> firstRunEnded{false};
+    std::atomic<int> resumedRuns{0};
+    std::atomic<int> freshRuns{0};
+};
+
+// Writes part of a download on its first run, which then stops or fails, and
+// counts whether the later runs resume it or start over.
+class ResumeProbeClient final : public DownloadMockClient {
+    public:
+    explicit ResumeProbeClient(std::shared_ptr<ResumeProbe> probe)
+        : probe_(std::move(probe)) {}
+
+    openscp::ProtocolCapabilities capabilities() const override {
+        openscp::ProtocolCapabilities result =
+            DownloadMockClient::capabilities();
+        result.can_resume_download = true;
+        return result;
+    }
+
+    bool get(const std::string &, const std::string &, std::string &err,
+             std::function<void(std::size_t, std::size_t)> progress,
+             std::function<bool()> shouldCancel, bool resume) override {
+        if (probe_->gets.fetch_add(1) == 0) {
+            progress(4096, 65536);
+            if (probe_->failure == openscp::RemoteErrorKind::None) {
+                while (!shouldCancel())
+                    std::this_thread::sleep_for(2ms);
+                err = "Canceled";
+                setLastOperationError(openscp::RemoteErrorKind::Canceled, err);
+            } else {
+                err = "The transfer failed";
+                setLastOperationError(probe_->failure, err, 0,
+                                      probe_->transient);
+            }
+            probe_->firstRunEnded = true;
+            return false;
+        }
+        if (probe_->runsThatMoveNothing.fetch_sub(1) > 0) {
+            err = "The transfer failed";
+            setLastOperationError(probe_->laterFailure, err);
+            return false;
+        }
+        ++(resume ? probe_->resumedRuns : probe_->freshRuns);
+        clearLastOperationError();
+        progress(65536, 65536);
+        err.clear();
+        return true;
+    }
+
+    std::unique_ptr<openscp::RemoteClient>
+    openConnection(const openscp::SessionOptions &options, std::string &err) {
+        return makeConnectedWorker<ResumeProbeClient>(options, err, probe_);
+    }
+
+    private:
+    std::shared_ptr<ResumeProbe> probe_;
+};
+
+// A task shows its final status a moment before its worker lets go of it,
+// and a retry in between is refused: retries until the next run starts. A
+// retry while that run is queued or running is refused too, and changes
+// nothing.
+bool retryUntilTheNextRunStarts(TransferManager &manager, quint64 taskId,
+                                const ResumeProbe &probe) {
+    const int runsBefore = probe.gets.load();
+    return waitUntil([&] {
+        if (probe.gets.load() == runsBefore)
+            manager.retryTask(taskId);
+        return probe.gets.load() > runsBefore;
+    });
+}
+
+OPENSCP_TEST(testReconnectingResumesTheDownloadTheDisconnectStopped, test) {
+    auto probe = std::make_shared<ResumeProbe>();
+    ResumeProbeClient baseClient(probe);
+    TransferManager manager;
+    configureManager(manager, baseClient, testOptions());
+    QTemporaryDir destination;
+    const quint64 taskId = manager.enqueueDownload(
+        QStringLiteral("/remote/file"), destination.filePath("file"),
+        testBatchOptions());
+    test.check(waitUntil([&] {
+                   const auto task = manager.taskSnapshot(taskId);
+                   return task && task->bytesDone > 0;
+               }),
+               "the download should write part of the file");
+
+    manager.clearSession();
+    test.check(waitUntil([&] { return probe->firstRunEnded.load(); }) &&
+                   waitForStatus(manager, taskId,
+                                 TransferTask::Status::WaitingForConnection),
+               "disconnecting should stop the download and keep it waiting");
+    configureManager(manager, baseClient, testOptions());
+    test.check(waitForStatus(manager, taskId, TransferTask::Status::Done),
+               "reconnecting should finish the download");
+    test.check(probe->resumedRuns.load() == 1 && probe->freshRuns.load() == 0,
+               "the download should continue its partial file, as the "
+               "disconnect dialog promises, instead of starting over");
+}
+
+OPENSCP_TEST(testRetryResumesAPartialDownloadUnlessItFailedItsCheck, test) {
+    for (const auto failure : {openscp::RemoteErrorKind::LocalIo,
+                               openscp::RemoteErrorKind::Integrity}) {
+        auto probe = std::make_shared<ResumeProbe>();
+        probe->failure = failure;
+        ResumeProbeClient baseClient(probe);
+        TransferManager manager;
+        configureManager(manager, baseClient, testOptions());
+        QTemporaryDir destination;
+        // An older copy is there, which the batch overwrites: overwriting
+        // still continues the task's own partial file.
+        QFile existing(destination.filePath("file"));
+        test.check(existing.open(QIODevice::WriteOnly) &&
+                       existing.write("older copy") == 10,
+                   "the older copy should be written");
+        existing.close();
+        const quint64 taskId = manager.enqueueDownload(
+            QStringLiteral("/remote/file"), destination.filePath("file"),
+            testBatchOptions());
+        test.check(waitForStatus(manager, taskId, TransferTask::Status::Error),
+                   "the partial download should fail");
+
+        test.check(
+            retryUntilTheNextRunStarts(manager, taskId, *probe) &&
+                waitForStatus(manager, taskId, TransferTask::Status::Done),
+            "the retried download should finish");
+        const bool integrity = failure == openscp::RemoteErrorKind::Integrity;
+        test.check(probe->resumedRuns.load() == (integrity ? 0 : 1) &&
+                       probe->freshRuns.load() == (integrity ? 1 : 0),
+                   integrity ? "a download that failed its integrity check "
+                               "should start over when retried"
+                             : "a retried download should continue its "
+                               "partial file");
+    }
+}
+
+OPENSCP_TEST(testRetryAfterARunThatMovedNothing, test) {
+    // The second run fails before it reports any progress. Lost on the
+    // connection, it says nothing about the partial file, which the third run
+    // must continue instead of truncating it. Refused otherwise, as when the
+    // .part is larger than the file it continues, resuming may be what
+    // failed, and the third run must start over instead of failing again.
+    for (const auto laterFailure : {openscp::RemoteErrorKind::Connection,
+                                    openscp::RemoteErrorKind::InvalidRequest}) {
+        const bool connection =
+            laterFailure == openscp::RemoteErrorKind::Connection;
+        auto probe = std::make_shared<ResumeProbe>();
+        probe->failure = openscp::RemoteErrorKind::LocalIo;
+        probe->runsThatMoveNothing = 1;
+        probe->laterFailure = laterFailure;
+        ResumeProbeClient baseClient(probe);
+        TransferManager manager;
+        configureManager(manager, baseClient, testOptions());
+        QTemporaryDir destination;
+        const quint64 taskId = manager.enqueueDownload(
+            QStringLiteral("/remote/file"), destination.filePath("file"),
+            testBatchOptions());
+        test.check(waitForStatus(manager, taskId, TransferTask::Status::Error),
+                   "the partial download should fail");
+        test.check(
+            retryUntilTheNextRunStarts(manager, taskId, *probe) &&
+                waitForStatus(manager, taskId, TransferTask::Status::Error),
+            "the retried download should fail at once");
+
+        test.check(
+            retryUntilTheNextRunStarts(manager, taskId, *probe) &&
+                waitForStatus(manager, taskId, TransferTask::Status::Done),
+            "the second retry should finish the download");
+        test.check(probe->resumedRuns.load() == (connection ? 1 : 0) &&
+                       probe->freshRuns.load() == (connection ? 0 : 1),
+                   connection ? "a retry should continue the partial file "
+                                "after a run the connection stopped"
+                              : "a retry should start over after a run that "
+                                "failed for another reason");
+    }
+}
+
+OPENSCP_TEST(testWorkerConnectionFailureKeepsThePartialDownload, test) {
+    auto probe = std::make_shared<ResumeProbe>();
+    probe->failure = openscp::RemoteErrorKind::Connection;
+    probe->transient = true;
+    ResumeProbeClient baseClient(probe);
+    const auto options = testOptions();
+    std::string connectError;
+    (void)baseClient.connect(options, connectError);
+    TransferManager manager;
+    manager.setSessionIdentity(QStringLiteral("test-session"));
+    std::atomic<int> connections{0};
+    // The worker reconnects for the automatic retry, and that connection
+    // fails; the next one works.
+    manager.setConnectionFactory(
+        [&](std::stop_token,
+            std::string &error) -> std::unique_ptr<openscp::RemoteClient> {
+            if (connections.fetch_add(1) == 1) {
+                error = "Connection refused";
+                return nullptr;
+            }
+            return baseClient.openConnection(options, error);
+        });
+    QTemporaryDir destination;
+    const quint64 taskId = manager.enqueueDownload(
+        QStringLiteral("/remote/file"), destination.filePath("file"),
+        testBatchOptions());
+    test.check(waitForStatus(manager, taskId, TransferTask::Status::Done),
+               "the download should finish once the worker reconnects");
+    test.check(connections.load() >= 3 && probe->resumedRuns.load() == 1 &&
+                   probe->freshRuns.load() == 0,
+               "a failed reconnection should keep the partial download for "
+               "the next run");
 }
 
 OPENSCP_TEST(testSessionChangesKeepPausesAndShowWaiting, test) {
@@ -1582,6 +2219,207 @@ OPENSCP_TEST(testSpeedLimitReachesRunningTask, test) {
                "the limited transfer should finish");
     test.check(probe->limitedChunkMs.load() >= 250,
                "a new speed limit should slow the running transfer");
+}
+
+// Writes each download, with its remote path as the content.
+class WritingDownloadClient final : public DownloadMockClient {
+    public:
+    bool get(const std::string &remote, const std::string &local,
+             std::string &err,
+             std::function<void(std::size_t, std::size_t)> progress,
+             std::function<bool()>, bool) override {
+        QFile file(QString::fromStdString(local));
+        if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate) ||
+            file.write(remote.data(), static_cast<qint64>(remote.size())) !=
+                static_cast<qint64>(remote.size())) {
+            err = "Could not write the download";
+            return false;
+        }
+        file.close();
+        progress(remote.size(), remote.size());
+        err.clear();
+        return true;
+    }
+
+    std::unique_ptr<openscp::RemoteClient>
+    openConnection(const openscp::SessionOptions &options, std::string &err) {
+        return makeConnectedWorker<WritingDownloadClient>(options, err);
+    }
+};
+
+OPENSCP_TEST(testDownloadsWhoseNamesDifferOnlyInCaseKeepBothFiles, test) {
+    // On Windows and macOS, "Makefile" and "makefile" are one local file, so
+    // the second download replaced the first; with Move, the first remote file
+    // was already gone.
+    WritingDownloadClient baseClient;
+    TransferManager manager;
+    configureManager(manager, baseClient, testOptions());
+    QTemporaryDir destination;
+    const QString upper = QStringLiteral("/remote/Makefile");
+    const QString lower = QStringLiteral("/remote/makefile");
+    manager.enqueueDownloads({{upper, destination.filePath("Makefile")},
+                              {lower, destination.filePath("makefile")}},
+                             testBatchOptions());
+    test.check(waitUntil([&] {
+                   const auto tasks = manager.tasksSnapshot();
+                   return tasks.size() == 2 &&
+                          std::all_of(tasks.cbegin(), tasks.cend(),
+                                      [](const TransferTask &task) {
+                                          return task.status ==
+                                                 TransferTask::Status::Done;
+                                      });
+               }),
+               "both downloads should finish");
+    QStringList contents;
+    for (const QFileInfo &entry :
+         QDir(destination.path())
+             .entryInfoList(QDir::Files | QDir::Hidden |
+                            QDir::NoDotAndDotDot)) {
+        QFile file(entry.filePath());
+        if (file.open(QIODevice::ReadOnly))
+            contents.push_back(QString::fromUtf8(file.readAll()));
+    }
+    contents.sort();
+    test.check(contents == QStringList{upper, lower},
+               "each download should keep its own file: " +
+                   contents.join(QStringLiteral(", ")).toStdString());
+}
+
+OPENSCP_TEST(testDownloadsIntoFoldersThatDifferOnlyInCaseStayApart, test) {
+    // On Windows and macOS, "Docs" and "docs" are one local folder, so the
+    // second "a.txt" replaced the first; with Move, the first remote file was
+    // already gone.
+    WritingDownloadClient baseClient;
+    TransferManager manager;
+    configureManager(manager, baseClient, testOptions());
+    QTemporaryDir destination;
+    QDir(destination.path()).mkdir(QStringLiteral("Chosen"));
+    const bool ignoresCase =
+        QFileInfo::exists(destination.filePath(QStringLiteral("chosen")));
+    const QString upper = QStringLiteral("/remote/Docs/a.txt");
+    const QString lower = QStringLiteral("/remote/docs/a.txt");
+    // The folder chosen to download into may be spelled in any case.
+    const QString intoChosen = QStringLiteral("/remote/c.txt");
+    manager.enqueueDownloads(
+        {{upper, destination.filePath(QStringLiteral("Docs/a.txt"))},
+         {lower, destination.filePath(QStringLiteral("docs/a.txt"))},
+         {intoChosen, destination.filePath(QStringLiteral("chosen/c.txt"))}},
+        testBatchOptions());
+    test.check(waitUntil([&] {
+                   const auto tasks = manager.tasksSnapshot();
+                   return tasks.size() == 3 &&
+                          std::all_of(tasks.cbegin(), tasks.cend(),
+                                      [](const TransferTask &task) {
+                                          return isTerminalTransferStatus(
+                                              task.status);
+                                      });
+               }),
+               "the downloads should finish");
+    QStringList done;
+    QStringList failed;
+    for (const TransferTask &task : manager.tasksSnapshot()) {
+        if (task.status == TransferTask::Status::Done)
+            done.push_back(task.src);
+        else
+            failed.push_back(task.src);
+    }
+    if (!ignoresCase) {
+        test.check(failed.isEmpty(),
+                   "folders that differ in case are distinct on this volume");
+        return;
+    }
+    QFile kept(destination.filePath(QStringLiteral("Docs/a.txt")));
+    const QString keptContent = kept.open(QIODevice::ReadOnly)
+                                    ? QString::fromUtf8(kept.readAll())
+                                    : QString();
+    test.check(failed.size() == 1 && failed.front() != intoChosen &&
+                   done.contains(intoChosen) && done.contains(keptContent),
+               "only the download into the merged folder should fail, done: " +
+                   done.join(QStringLiteral(", ")).toStdString() +
+                   "; kept: " + keptContent.toStdString());
+}
+
+// Reports a download in equal chunks, counted as the SFTP backend counts
+// them: from the size of the partial file when it resumes.
+class ChunkedDownloadClient final : public DownloadMockClient {
+    public:
+    ChunkedDownloadClient(std::size_t partialBytes, std::size_t chunkBytes,
+                          std::size_t chunks)
+        : partialBytes_(partialBytes), chunkBytes_(chunkBytes),
+          chunks_(chunks) {}
+
+    bool get(const std::string &, const std::string &, std::string &err,
+             std::function<void(std::size_t, std::size_t)> progress,
+             std::function<bool()>, bool resume) override {
+        const std::size_t offset = resume ? partialBytes_ : 0;
+        for (std::size_t chunk = 1; chunk <= chunks_; ++chunk)
+            progress(offset + chunk * chunkBytes_,
+                     offset + chunks_ * chunkBytes_);
+        err.clear();
+        return true;
+    }
+
+    private:
+    std::size_t partialBytes_;
+    std::size_t chunkBytes_;
+    std::size_t chunks_;
+};
+
+TransferTask chunkedDownloadTask(const QTemporaryDir &destination) {
+    TransferTask task;
+    task.type = TransferTask::Type::Download;
+    task.src = QStringLiteral("/remote/chunked");
+    task.dst = destination.filePath("chunked");
+    return task;
+}
+
+OPENSCP_TEST(testResumedTransferChargesOnlyNewBytesToSpeedLimits, test) {
+    // The speed limits hold a task until they allow every byte charged to
+    // them: at 1024 KiB/s, the 64 MiB of the partial file would stop it for
+    // about a minute.
+    constexpr std::size_t kChunkBytes = 64 * 1024;
+    constexpr std::size_t kChunks = 4;
+    const auto client = std::make_shared<ChunkedDownloadClient>(
+        64 * 1024 * 1024, kChunkBytes, kChunks);
+    QTemporaryDir destination;
+    TransferTask task = chunkedDownloadTask(destination);
+    quint64 charged = 0;
+    TransferExecutor::Callbacks callbacks;
+    callbacks.acquireGlobalBandwidth = [&charged](quint64 bytes) {
+        charged += bytes;
+        return true;
+    };
+    std::string error;
+    const bool succeeded =
+        TransferExecutor::run(task, client, true, error, callbacks);
+    // The first report only marks where the attempt starts.
+    test.check(succeeded && charged == (kChunks - 1) * kChunkBytes,
+               "a resumed transfer should charge only the bytes it moves, not "
+               "its partial file: " +
+                   std::to_string(charged));
+}
+
+OPENSCP_TEST(testRemovingTheSpeedLimitEndsTheWaitUnderWay, test) {
+    // One chunk of 512 KiB holds the task 8 seconds at 64 KiB/s.
+    const auto client =
+        std::make_shared<ChunkedDownloadClient>(0, 512 * 1024, 1);
+    QTemporaryDir destination;
+    TransferTask task = chunkedDownloadTask(destination);
+    // The limit is removed while the task waits: from its fifth reading on,
+    // which comes after a few slices of the wait.
+    constexpr int kLimitedReads = 4;
+    std::atomic<int> reads{0};
+    TransferExecutor::Callbacks callbacks;
+    callbacks.taskSpeedLimitKBps = [&reads] {
+        return reads.fetch_add(1) < kLimitedReads ? 64 : 0;
+    };
+    const auto started = std::chrono::steady_clock::now();
+    std::string error;
+    const bool succeeded =
+        TransferExecutor::run(task, client, false, error, callbacks);
+    const auto elapsed = std::chrono::steady_clock::now() - started;
+    test.check(succeeded && reads.load() > kLimitedReads && elapsed < 3s,
+               "removing the limit should let the waiting task go on");
 }
 
 class PartialProgressFailureClient final : public DownloadMockClient {
@@ -2534,7 +3372,18 @@ OPENSCP_TEST(testLocalMoveCleanupExcludesRemotePathsAndFollowsAncestors, test) {
                "a missing prerequisite must not exempt an independent reader");
 }
 
-#ifndef _WIN32
+// Windows removes a move's source once it is unchanged and nothing else reads
+// it. POSIX cannot remove a file only while it is unchanged, so a move there
+// leaves its source to the user, with a warning.
+#ifdef _WIN32
+constexpr TransferTask::Status kCleanedMoveStatus = TransferTask::Status::Done;
+constexpr bool kMovedSourceRemains = false;
+#else
+constexpr TransferTask::Status kCleanedMoveStatus =
+    TransferTask::Status::Warning;
+constexpr bool kMovedSourceRemains = true;
+#endif
+
 struct SourceUploadProbe {
     std::atomic_int uploads{0};
     std::mutex mutex;
@@ -2704,15 +3553,15 @@ OPENSCP_TEST(testMoveCleanupWaitsForQueuedSourceReader, test) {
     }
     probe->changed.notify_all();
     test.check(waitForStatus(manager, copy, TransferTask::Status::Done) &&
-                   waitForStatus(manager, move, TransferTask::Status::Warning),
-               "copy should read the shared source before manual move cleanup");
+                   waitForStatus(manager, move, kCleanedMoveStatus),
+               "copy should read the shared source before move cleanup");
     {
         std::lock_guard<std::mutex> lock(probe->mutex);
         test.check(probe->uploaded["/home/demo/copy"] == "original",
                    "queued copy should upload the original source bytes");
     }
-    test.check(QFileInfo::exists(source),
-               "move must preserve its source after the queued copy finishes");
+    test.check(QFileInfo::exists(source) == kMovedSourceRemains,
+               "move should finish its cleanup after the queued copy");
 }
 
 OPENSCP_TEST(testMoveCleanupWaitsForRunningSourceReader, test) {
@@ -2753,11 +3602,10 @@ OPENSCP_TEST(testMoveCleanupWaitsForRunningSourceReader, test) {
         probe->releaseCopy = true;
     }
     probe->changed.notify_all();
-    test.check(
-        waitForStatus(manager, copy, TransferTask::Status::Done) &&
-            waitForStatus(manager, move, TransferTask::Status::Warning) &&
-            QFileInfo::exists(source),
-        "move should require manual cleanup after the active copy completes");
+    test.check(waitForStatus(manager, copy, TransferTask::Status::Done) &&
+                   waitForStatus(manager, move, kCleanedMoveStatus) &&
+                   QFileInfo::exists(source) == kMovedSourceRemains,
+               "move should finish its cleanup after the active copy");
 }
 
 OPENSCP_TEST(testMoveCleanupDoesNotWaitForItsDependentTask, test) {
@@ -2783,14 +3631,69 @@ OPENSCP_TEST(testMoveCleanupDoesNotWaitForItsDependentTask, test) {
         source, QStringLiteral("/home/demo/copy"), dependent);
     configureManager(manager, baseClient, testOptions());
 
-    test.check(waitForStatus(manager, move, TransferTask::Status::Warning),
+    test.check(waitForStatus(manager, move, kCleanedMoveStatus),
                "move cleanup must not wait for a task depending on that move");
+#ifdef _WIN32
+    // The dependent copy runs once the move has removed the source.
+    test.check(waitForStatus(manager, copy, TransferTask::Status::Error) &&
+                   !QFileInfo::exists(source),
+               "dependent work should run after the move's cleanup");
+#else
     test.check(waitForStatus(manager, copy, TransferTask::Status::Skipped) &&
                    QFileInfo::exists(source),
                "dependent work must wait for successful cleanup without "
                "deleting the source");
+#endif
 }
 
+#ifdef _WIN32
+OPENSCP_TEST(testMoveUploadManualCleanupDoesNotRetransfer, test) {
+    QTemporaryDir root;
+    const QString source = root.filePath("source.txt");
+    QFile initial(source);
+    test.check(initial.open(QIODevice::WriteOnly) &&
+                   initial.write("original") == 8,
+               "manual cleanup fixture should create the local source");
+    initial.close();
+    // Another program holds the source open without sharing deletion, so
+    // the move cannot remove it.
+    const std::wstring nativeSource =
+        QDir::toNativeSeparators(source).toStdWString();
+    const HANDLE holder =
+        ::CreateFileW(nativeSource.c_str(), GENERIC_READ, FILE_SHARE_READ,
+                      nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    test.check(holder != INVALID_HANDLE_VALUE,
+               "the fixture should hold the source open");
+    auto probe = std::make_shared<SourceUploadProbe>();
+    SourceUploadClient baseClient(probe);
+    TransferManager manager;
+    manager.setMaxConcurrent(1);
+    configureManager(manager, baseClient, testOptions());
+    auto batch = testBatchOptions();
+    batch.operation = TransferOperation::Move;
+    const quint64 move =
+        manager.enqueueUpload(source, QStringLiteral("/home/demo/move"), batch);
+    test.check(waitForStatus(manager, move, TransferTask::Status::Warning) &&
+                   QFileInfo::exists(source),
+               "a move should keep a source it cannot remove, with a warning");
+    const auto pending = manager.taskSnapshot(move);
+    test.check(pending && pending->phase == TransferPhase::DeleteSource &&
+                   pending->error.contains(QStringLiteral("could not be "
+                                                          "removed")),
+               "the warning should keep the copy result and explain itself");
+    if (holder != INVALID_HANDLE_VALUE)
+        ::CloseHandle(holder);
+    manager.retryTask(move);
+    test.check(waitForStatus(manager, move, TransferTask::Status::Done) &&
+                   !QFileInfo::exists(source),
+               "retry should finish the cleanup once the source is free");
+    std::lock_guard lock(probe->mutex);
+    test.check(
+        probe->uploaded["/home/demo/move"] == "original" &&
+            probe->uploads.load() == 1,
+        "cleanup retry must preserve the upload without transferring again");
+}
+#else
 OPENSCP_TEST(testMoveUploadManualCleanupDoesNotRetransfer, test) {
     QTemporaryDir root;
     const QString source = root.filePath("source.txt");
@@ -3591,7 +4494,6 @@ OPENSCP_TEST(testBatchCancellationAndDirectoryTasks, test) {
 }
 
 OPENSCP_TEST(testLocalDirectoryTaskRejectsSymlinkParent, test) {
-#ifndef _WIN32
     auto probe = std::make_shared<ConcurrencyProbe>();
     ConcurrentMockClient baseClient(probe);
     TransferManager manager;
@@ -3601,7 +4503,7 @@ OPENSCP_TEST(testLocalDirectoryTaskRejectsSymlinkParent, test) {
     test.check(selected.isValid() && outside.isValid(),
                "local directory fixtures should initialize");
     const QString linked = selected.filePath("linked");
-    test.check(QFile::link(outside.path(), linked),
+    test.check(openscp::testsupport::createLocalLink(outside.path(), linked),
                "a parent directory symlink should be created");
 
     TransferBatchOptions batch;
@@ -3611,7 +4513,6 @@ OPENSCP_TEST(testLocalDirectoryTaskRejectsSymlinkParent, test) {
                    !QFileInfo(outside.filePath("created")).exists(),
                "a local directory task must not create outside its chosen "
                "folder through a symlink");
-#endif
 }
 
 OPENSCP_TEST(testPersistentDeletionTasks, test) {
@@ -3949,6 +4850,25 @@ OPENSCP_TEST(testRemovingUploadCanQueueRemotePartialCleanup, test) {
                "remote cleanup should target the deterministic .part path");
 }
 
+OPENSCP_TEST(testRemovingUploadsQueuesTheirCleanupsAtOnce, test) {
+    TransferManager manager;
+    TransferBatchOptions batch;
+    batch.sessionKey = QStringLiteral("test-session");
+    QVector<quint64> uploads;
+    for (int index = 0; index < 3; ++index) {
+        uploads.push_back(manager.enqueueUpload(
+            QStringLiteral("/local/upload-%1").arg(index),
+            QStringLiteral("/remote/upload-%1").arg(index), batch));
+    }
+    int addedNotifications = 0;
+    QObject::connect(&manager, &TransferManager::tasksAdded, &manager,
+                     [&](const QVector<quint64> &) { ++addedNotifications; });
+    manager.removeTasks(uploads, true);
+    test.check(manager.tasksSnapshot().size() == 3 && addedNotifications == 1,
+               "the cleanups of removed uploads should be queued as one "
+               "addition, not one per upload");
+}
+
 OPENSCP_TEST(testRemovingDownloadKeepsAnotherDownloadsPartial, test) {
     QTemporaryDir root;
     const QString destination = root.filePath("shared.dat");
@@ -3970,6 +4890,26 @@ OPENSCP_TEST(testRemovingDownloadKeepsAnotherDownloadsPartial, test) {
     manager.removeTask(kept, true);
     test.check(!QFile::exists(partial.fileName()),
                "the last download to a destination should delete its partial");
+}
+
+OPENSCP_TEST(testRemovingADownloadWithALongNameDeletesItsPartial, test) {
+    // A name with no room for ".part" gets a shorter partial file from the
+    // core, which the queue must name the same way to delete it.
+    QTemporaryDir root;
+    const QString destination = root.filePath(QString(252, QLatin1Char('n')));
+    QFile partial(partialPathFor(destination));
+    test.check(partial.fileName() != destination + QStringLiteral(".part") &&
+                   partial.open(QIODevice::WriteOnly),
+               "the partial file of a long name should be created");
+    partial.close();
+
+    TransferManager manager;
+    const quint64 download =
+        manager.enqueueDownload(QStringLiteral("/remote/long"), destination);
+    manager.removeTask(download, true);
+    test.check(!QFile::exists(partial.fileName()),
+               "removing a download should delete its partial file, under "
+               "the name the core gave it");
 }
 
 OPENSCP_TEST(testRemovingFinishedTasksLeavesPartialFilesAlone, test) {
@@ -4370,8 +5310,39 @@ OPENSCP_TEST(testQueueWriterReportsAFailureOnce, test) {
     test.check(savedDestinations(path) == QStringList{QStringLiteral("/saved")},
                "a queue that fits should be saved again");
     writer.saveAndWait(queueOverTheTaskLimit());
-    test.check(warnings.load() == 2,
+    // The writer may report a failure only after saveAndWait has returned.
+    test.check(waitUntil([&warnings] { return warnings.load() == 2; }),
                "a failure after a successful save should be reported again");
+}
+
+OPENSCP_TEST(testQueueWriterCountsFailuresInARow, test) {
+    // The manager waits longer before each retry of a save that keeps
+    // failing, and as before once a save has worked.
+    QTemporaryDir root;
+    const QString path = root.filePath("failing.json");
+    std::mutex failuresMutex;
+    QVector<int> failures;
+    const auto reported = [&] {
+        std::lock_guard<std::mutex> lock(failuresMutex);
+        return failures;
+    };
+    TransferQueueWriter writer;
+    writer.setFailureHandler([&](int failuresInARow) {
+        std::lock_guard<std::mutex> lock(failuresMutex);
+        failures.push_back(failuresInARow);
+    });
+    writer.setPath(path);
+
+    writer.saveAndWait(queueOverTheTaskLimit());
+    writer.saveAndWait(queueOverTheTaskLimit());
+    test.check(waitUntil([&] { return reported().size() == 2; }) &&
+                   reported() == QVector<int>{1, 2},
+               "each failure in a row should be counted");
+    writer.saveAndWait({persistableTask(1, QStringLiteral("/saved"))});
+    writer.saveAndWait(queueOverTheTaskLimit());
+    test.check(waitUntil([&] { return reported().size() == 3; }) &&
+                   reported() == QVector<int>{1, 2, 1},
+               "a save that works should start the count over");
 }
 
 OPENSCP_TEST(testPausedQueuePersistence, test) {
@@ -4398,12 +5369,16 @@ OPENSCP_TEST(testPausedQueuePersistence, test) {
                "queue persistence should be schema-versioned");
     test.check(!stored.contains("password") && !stored.contains("passphrase"),
                "queue persistence must not contain credentials");
+#ifdef Q_OS_UNIX
+    // Windows has no permission bits: the profile folder's ACL keeps the
+    // queue private there.
     const auto permissions = QFile::permissions(queuePath);
     test.check(permissions.testFlag(QFileDevice::ReadOwner) &&
                    permissions.testFlag(QFileDevice::WriteOwner) &&
                    !permissions.testFlag(QFileDevice::ReadGroup) &&
                    !permissions.testFlag(QFileDevice::ReadOther),
                "queue persistence should use owner-only permissions");
+#endif
 
     TransferManager restored;
     test.check(restored.enablePersistence(queuePath),
@@ -4747,5 +5722,5 @@ int main(int argc, char **argv) {
     QCoreApplication::setApplicationName(
         QStringLiteral("openscp-transfer-manager-tests"));
     openscp::test::TestHarness harness("transfer manager");
-    return harness.run();
+    return harness.run(argc, argv);
 }

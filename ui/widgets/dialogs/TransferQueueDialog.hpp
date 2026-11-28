@@ -119,6 +119,9 @@ class TransferQueueDialog : public QDialog {
     class QSpinBox *autoClearMinutesSpin_ = nullptr;
     bool suppressAutoClearSignal_ = false;
     class QTimer *summaryTimer_ = nullptr;
+    // The selected tasks as the summary last read them from the table.
+    QVector<quint64> summarySelection_;
+    bool summarySelectionStale_ = true;
     QPointer<QParallelAnimationGroup> windowTransitionAnimation_;
     QRect restingGeometry_;
     WindowTransition windowTransition_ = WindowTransition::None;

@@ -19,6 +19,9 @@ permissions:
 jobs:
   mirror:
     name: Mirror Git refs
+    # Runs started by Dependabot get no Actions secrets. The next push by
+    # anyone else mirrors every branch, Dependabot's included.
+    if: github.actor != 'dependabot[bot]'
     runs-on: ubuntu-latest
     timeout-minutes: 15
 

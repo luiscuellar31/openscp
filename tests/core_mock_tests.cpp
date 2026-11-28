@@ -1,9 +1,11 @@
 // Core unit tests without external framework (run via CTest).
+#include "IntegrationTestSupport.hpp"
 #include "TestHarness.hpp"
 #include "common/RemoteListingLimits.hpp"
 #include "common/UniqueFile.hpp"
 #include "libssh2/Libssh2ScpClient.hpp"
 #include "libssh2/Libssh2SftpClient.hpp"
+#include "libssh2/detail/HostKeyBlob.hpp"
 #include "libssh2/detail/KnownHostsFile.hpp"
 #include "libssh2/detail/Libssh2CipherPreference.hpp"
 #include "libssh2/detail/Libssh2ErrorClassifier.hpp"
@@ -25,18 +27,25 @@
 #if OPENSCP_HAS_CURL_FTP || OPENSCP_HAS_CURL_WEBDAV
 #include "curl/CurlBackendCommon.hpp"
 #endif
+#ifdef _WIN32
+#include "libssh2/detail/SshJumpTunnel_win.hpp"
+#endif
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <cerrno>
 #include <chrono>
+#include <cstdint>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <future>
 #include <iostream>
 #include <iterator>
 #include <optional>
+#include <sstream>
 #include <string>
 #include <thread>
 #include <type_traits>
@@ -50,6 +59,14 @@
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#else
+// clang-format off
+#include <winsock2.h>
+#include <windows.h>
+#include <winioctl.h>
+#include <shellapi.h>
+// clang-format on
+#include <io.h>
 #endif
 
 namespace openscp {
@@ -59,6 +76,15 @@ struct Libssh2SftpClientTestAccess {
         std::lock_guard lock(client.stateMutex_);
         client.sock_ = socket;
         client.connected_.store(true);
+    }
+
+    // Runs `during` while `client` holds off interrupts, as a replacement
+    // does once it moves the old destination aside.
+    static void holdInterrupts(Libssh2SftpClient &client,
+                               const std::function<void()> &during) {
+        Libssh2SftpClient::InterruptHold hold(client);
+        hold.engage();
+        during();
     }
 };
 
@@ -169,6 +195,34 @@ OPENSCP_TEST(test_concurrent_disconnect_unblocks_io_and_preserves_reused_socket,
     ::close(reused[1]);
 }
 
+OPENSCP_TEST(test_interrupt_waits_for_a_replaced_file_to_be_back_in_place, t) {
+    // Without posix-rename, a replacement moves the old file aside before it
+    // renames the new one into place. A pause in between shut the connection
+    // down and left the old file aside with nothing in its place.
+    int pair[2] = {-1, -1};
+    t.check(::socketpair(AF_UNIX, SOCK_STREAM, 0, pair) == 0,
+            "interrupt fixture should create a local transport");
+    if (pair[0] < 0)
+        return;
+    const auto peerSeesShutdown = [&](int timeoutMs) {
+        pollfd peer{pair[1], POLLIN, 0};
+        char byte = 0;
+        return ::poll(&peer, 1, timeoutMs) > 0 &&
+               ::recv(pair[1], &byte, 1, MSG_DONTWAIT) == 0;
+    };
+    openscp::Libssh2SftpClient client;
+    openscp::Libssh2SftpClientTestAccess::attachSocket(client, pair[0]);
+    bool keptOpen = false;
+    openscp::Libssh2SftpClientTestAccess::holdInterrupts(client, [&] {
+        client.interrupt();
+        keptOpen = client.isConnected() && !peerSeesShutdown(0);
+    });
+    t.check(keptOpen, "an interrupt must wait while the old file is aside");
+    t.check(peerSeesShutdown(1000) && !client.isConnected(),
+            "the interrupt must take effect once the file is back in place");
+    ::close(pair[1]);
+}
+
 OPENSCP_TEST(test_tcp_wait_deadline_and_cancellation, t) {
     int pair[2] = {-1, -1};
     t.check(::socketpair(AF_UNIX, SOCK_STREAM, 0, pair) == 0,
@@ -183,17 +237,19 @@ OPENSCP_TEST(test_tcp_wait_deadline_and_cancellation, t) {
     }
     t.check(errno == EAGAIN || errno == EWOULDBLOCK,
             "filled send buffer should withhold write readiness");
-    std::string error;
+    using Kind = openscp::libssh2detail::TcpWaitOutcome::Kind;
     const auto started = std::chrono::steady_clock::now();
-    t.check(!openscp::libssh2detail::waitForTcpConnection(
-                pair[0], started + std::chrono::milliseconds(40), {}, error) &&
+    t.check(openscp::libssh2detail::waitForTcpConnections(
+                {pair[0]}, started + std::chrono::milliseconds(40), {})
+                        .kind == Kind::TimedOut &&
                 errno == ETIMEDOUT,
             "a non-ready socket must respect the shared TCP deadline");
     std::stop_source cancellation;
     auto waiting = std::async(std::launch::async, [&] {
-        return openscp::libssh2detail::waitForTcpConnection(
-            pair[0], std::chrono::steady_clock::now() + std::chrono::seconds(2),
-            cancellation.get_token(), error);
+        return openscp::libssh2detail::waitForTcpConnections(
+            {pair[0]},
+            std::chrono::steady_clock::now() + std::chrono::seconds(2),
+            cancellation.get_token());
     });
     t.check(waiting.wait_for(std::chrono::milliseconds(20)) ==
                 std::future_status::timeout,
@@ -201,7 +257,7 @@ OPENSCP_TEST(test_tcp_wait_deadline_and_cancellation, t) {
     cancellation.request_stop();
     t.check(waiting.wait_for(std::chrono::milliseconds(500)) ==
                     std::future_status::ready &&
-                !waiting.get() && error == "Connection canceled by user",
+                waiting.get().error == "Connection canceled by user",
             "pending TCP cancellation must finish without waiting for timeout");
     ::close(pair[0]);
     ::close(pair[1]);
@@ -267,7 +323,374 @@ OPENSCP_TEST(test_connection_cancel_while_peer_is_silent, t) {
                 "canceled connection creation must not return a live client");
     }
 }
+
+OPENSCP_TEST(test_ssh_handshake_failure_says_why, t) {
+    // "SSH handshake failed" alone read the same for a server with no
+    // algorithm in common and for one that dropped the connection.
+    const int listener = ::socket(AF_INET, SOCK_STREAM, 0);
+    sockaddr_in address{};
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    socklen_t length = sizeof(address);
+    const bool listening =
+        listener >= 0 &&
+        ::bind(listener, reinterpret_cast<sockaddr *>(&address),
+               sizeof(address)) == 0 &&
+        ::listen(listener, 1) == 0 &&
+        ::getsockname(listener, reinterpret_cast<sockaddr *>(&address),
+                      &length) == 0;
+    t.check(listening, "the fake SSH server should listen");
+    if (!listening) {
+        if (listener >= 0)
+            ::close(listener);
+        return;
+    }
+    std::thread server([listener] {
+        // A connect that fails before it reaches the server must not leave
+        // this thread waiting for it.
+        pollfd ready{listener, POLLIN, 0};
+        if (::poll(&ready, 1, 3000) <= 0)
+            return;
+        const int peer = ::accept(listener, nullptr, nullptr);
+        if (peer < 0)
+            return;
+        const std::string banner = "SSH-2.0-fake\r\n";
+        (void)::send(peer, banner.data(), banner.size(), 0);
+        ::shutdown(peer, SHUT_RDWR);
+        ::close(peer);
+    });
+    auto options = validOptions();
+    options.host = "127.0.0.1";
+    options.port = ntohs(address.sin_port);
+    options.known_hosts_policy = openscp::KnownHostsPolicy::Off;
+    openscp::Libssh2SftpClient client;
+    std::string error;
+    const bool connected = client.connect(options, error);
+    server.join();
+    ::close(listener);
+    const std::string prefix = "SSH handshake failed: ";
+    t.check(!connected && error.rfind(prefix, 0) == 0 &&
+                error.size() > prefix.size(),
+            "a failed handshake should say why: " + error);
+}
+
+// The Proxy-Authorization a proxy gets for these credentials in Basic.
+std::string basicAuthorization(const std::string &credentials) {
+    static constexpr char kDigits[] =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    std::string encoded = "Basic ";
+    for (std::size_t index = 0; index < credentials.size(); index += 3) {
+        const std::size_t length =
+            std::min<std::size_t>(3, credentials.size() - index);
+        std::uint32_t bits = 0;
+        for (std::size_t offset = 0; offset < 3; ++offset) {
+            bits <<= 8;
+            if (offset < length)
+                bits |= static_cast<unsigned char>(credentials[index + offset]);
+        }
+        for (std::size_t digit = 0; digit < 4; ++digit)
+            encoded += digit <= length
+                           ? kDigits[(bits >> (18 - 6 * digit)) & 0x3fu]
+                           : '=';
+    }
+    return encoded;
+}
+
+// Connects through a fake HTTP proxy that answers a CONNECT without
+// credentials with a 407 and `challenge`, and one with them with a 200 and
+// the end of the tunnel. Returns the Proxy-Authorization of each CONNECT.
+std::vector<std::string> connectThroughAskingProxy(TestContext &t,
+                                                   const std::string &challenge,
+                                                   std::string &error) {
+    const int listener = ::socket(AF_INET, SOCK_STREAM, 0);
+    sockaddr_in address{};
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    socklen_t length = sizeof(address);
+    const bool listening =
+        listener >= 0 &&
+        ::bind(listener, reinterpret_cast<sockaddr *>(&address),
+               sizeof(address)) == 0 &&
+        ::listen(listener, 4) == 0 &&
+        ::getsockname(listener, reinterpret_cast<sockaddr *>(&address),
+                      &length) == 0;
+    t.check(listening, "the fake HTTP proxy should listen");
+    std::vector<std::string> authorizations;
+    if (!listening) {
+        if (listener >= 0)
+            ::close(listener);
+        return authorizations;
+    }
+    std::atomic<bool> finished{false};
+    std::thread proxy([&] {
+        for (;;) {
+            pollfd ready{listener, POLLIN, 0};
+            if (::poll(&ready, 1, 5000) <= 0)
+                return;
+            const int peer = ::accept(listener, nullptr, nullptr);
+            if (peer < 0 || finished.load()) {
+                if (peer >= 0)
+                    ::close(peer);
+                return;
+            }
+            std::string head;
+            char byte = 0;
+            while (head.find("\r\n\r\n") == std::string::npos &&
+                   ::recv(peer, &byte, 1, 0) == 1)
+                head.push_back(byte);
+            const std::size_t found = head.find("Proxy-Authorization: ");
+            authorizations.push_back(
+                found == std::string::npos
+                    ? std::string()
+                    : head.substr(found + 21,
+                                  head.find("\r\n", found) - found - 21));
+            const std::string reply =
+                found == std::string::npos
+                    ? "HTTP/1.1 407 Proxy Authentication Required\r\n"
+                      "Proxy-Authenticate: " +
+                          challenge +
+                          "\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                    : "HTTP/1.1 200 Connection established\r\n\r\n";
+            (void)::send(peer, reply.data(), reply.size(), 0);
+            ::shutdown(peer, SHUT_RDWR);
+            ::close(peer);
+        }
+    });
+    auto options = validOptions();
+    options.port = 22;
+    options.known_hosts_policy = openscp::KnownHostsPolicy::Off;
+    options.proxy_type = openscp::ProxyType::HttpConnect;
+    options.proxy_host = "127.0.0.1";
+    options.proxy_port = ntohs(address.sin_port);
+    options.proxy_username = std::string("proxy-user");
+    options.proxy_password = openscp::SecureString("proxy-secret");
+    {
+        openscp::Libssh2SftpClient client;
+        (void)client.connect(options, error);
+    }
+    // Wakes the proxy if it still waits for a connection.
+    finished = true;
+    const int waker = ::socket(AF_INET, SOCK_STREAM, 0);
+    if (waker >= 0) {
+        (void)::connect(waker, reinterpret_cast<sockaddr *>(&address),
+                        sizeof(address));
+        ::close(waker);
+    }
+    proxy.join();
+    ::close(listener);
+    return authorizations;
+}
+
+OPENSCP_TEST(test_http_proxy_gets_the_password_only_when_it_asks, t) {
+    // Basic sends the password in the clear, so it must not go to a proxy
+    // before that proxy asks for it with a 407.
+    std::string error;
+    const auto basic = connectThroughAskingProxy(
+        t, "Digest realm=\"proxy\", nonce=\"a,b\", Basic realm=\"proxy\"",
+        error);
+    t.check(basic.size() == 2 && basic[0].empty() &&
+                basic[1] == basicAuthorization("proxy-user:proxy-secret"),
+            "the first CONNECT should go without the password and the next "
+            "one answer the Basic challenge");
+
+    error.clear();
+    const auto other = connectThroughAskingProxy(t, "NTLM, Negotiate", error);
+    t.check(other.size() == 1 && other[0].empty() &&
+                error.find("NTLM, Negotiate") != std::string::npos,
+            "a proxy that offers no Basic should never get the password, and "
+            "the error should name what it offers: " +
+                error);
+
+    // A quoted backslash, spaces around "=", and a challenge that goes on in
+    // a second line: Basic is still among the schemes on offer.
+    error.clear();
+    const auto unusual = connectThroughAskingProxy(
+        t, "Digest realm=\"a\\\\\", nonce = \"b,c\",\r\n Basic realm=\"proxy\"",
+        error);
+    t.check(unusual.size() == 2 && unusual[0].empty() &&
+                unusual[1] == basicAuthorization("proxy-user:proxy-secret"),
+            "Basic should be found in an unusually written challenge");
+}
+
+OPENSCP_TEST(test_ssh_reaches_a_bracketed_ipv6_host, t) {
+    // The brackets reached getaddrinfo, which on macOS and Linux finds no
+    // host named "[::1]", so the connection never left the machine.
+    const int listener = ::socket(AF_INET6, SOCK_STREAM, 0);
+    sockaddr_in6 address{};
+    address.sin6_family = AF_INET6;
+    address.sin6_addr = in6addr_loopback;
+    socklen_t length = sizeof(address);
+    const bool listening =
+        listener >= 0 &&
+        ::bind(listener, reinterpret_cast<sockaddr *>(&address),
+               sizeof(address)) == 0 &&
+        ::listen(listener, 1) == 0 &&
+        ::getsockname(listener, reinterpret_cast<sockaddr *>(&address),
+                      &length) == 0;
+    if (!listening) {
+        if (listener >= 0)
+            ::close(listener);
+        t.skip("this system has no IPv6 loopback");
+        return;
+    }
+    auto options = validOptions();
+    options.host = "[::1]";
+    options.port = ntohs(address.sin6_port);
+    options.known_hosts_policy = openscp::KnownHostsPolicy::Off;
+    std::string error;
+    auto connecting = std::async(std::launch::async, [&] {
+        openscp::Libssh2SftpClient client;
+        return client.connect(options, error);
+    });
+    pollfd ready{listener, POLLIN, 0};
+    const bool accepted = ::poll(&ready, 1, 3000) > 0;
+    const int peer = accepted ? ::accept(listener, nullptr, nullptr) : -1;
+    if (peer >= 0) {
+        ::shutdown(peer, SHUT_RDWR);
+        ::close(peer);
+    }
+    const bool connected = connecting.get();
+    ::close(listener);
+    t.check(accepted && !connected,
+            "a bracketed IPv6 host should reach its server: " + error);
+}
 #endif
+
+#ifdef _WIN32
+using SocketLength = int;
+#else
+using SocketLength = socklen_t;
+#endif
+
+// 192.0.2.1, of TEST-NET-1, reaches no host: its packets are dropped, as
+// those of a broken IPv6 route are, unless the system has no route at all.
+constexpr std::uint32_t kUnreachableAddress = 0xC0000201;
+
+// The TCP endpoint of an IPv4 `address`, in host byte order, and `port`.
+openscp::libssh2detail::TcpEndpoint ipv4Endpoint(std::uint32_t address,
+                                                 std::uint16_t port) {
+    sockaddr_in socketAddress{};
+    socketAddress.sin_family = AF_INET;
+    socketAddress.sin_addr.s_addr = htonl(address);
+    socketAddress.sin_port = htons(port);
+    const auto *bytes = reinterpret_cast<const unsigned char *>(&socketAddress);
+    return {AF_INET, SOCK_STREAM, IPPROTO_TCP,
+            std::vector<unsigned char>(bytes, bytes + sizeof(socketAddress))};
+}
+
+// A loopback port the system picks, which accepts connections when listening
+// and refuses them otherwise.
+struct LoopbackPort {
+    openscp::libssh2detail::SocketHandle socket =
+        openscp::libssh2detail::kInvalidSocket;
+    std::uint16_t port = 0;
+
+    explicit LoopbackPort(bool listening)
+        : socket(openscp::libssh2detail::openSocket(AF_INET, SOCK_STREAM,
+                                                    IPPROTO_TCP)) {
+        sockaddr_in address{};
+        address.sin_family = AF_INET;
+        address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+        SocketLength length = sizeof(address);
+        if (socket != openscp::libssh2detail::kInvalidSocket &&
+            ::bind(socket, reinterpret_cast<sockaddr *>(&address),
+                   sizeof(address)) == 0 &&
+            ::getsockname(socket, reinterpret_cast<sockaddr *>(&address),
+                          &length) == 0 &&
+            (!listening || ::listen(socket, 4) == 0)) {
+            port = ntohs(address.sin_port);
+        }
+    }
+    ~LoopbackPort() {
+        if (socket != openscp::libssh2detail::kInvalidSocket)
+            openscp::libssh2detail::closeSocket(socket);
+    }
+    LoopbackPort(const LoopbackPort &) = delete;
+    LoopbackPort &operator=(const LoopbackPort &) = delete;
+};
+
+OPENSCP_TEST(test_tcp_connect_goes_on_past_an_address_that_refuses, t) {
+    // Windows retries a refused connect for about 2 seconds, as happens with
+    // "localhost" when a server listens on 127.0.0.1 but not on ::1.
+    std::string error;
+    t.checkWithError(openscp::libssh2detail::initializeSockets(error),
+                     "sockets should start: ", error);
+    const LoopbackPort refusing(false);
+    const LoopbackPort listening(true);
+    t.check(refusing.port != 0 && listening.port != 0,
+            "the loopback ports should open");
+    const auto started = std::chrono::steady_clock::now();
+    const auto socket = openscp::libssh2detail::connectToFirstEndpoint(
+        {ipv4Endpoint(INADDR_LOOPBACK, refusing.port),
+         ipv4Endpoint(INADDR_LOOPBACK, listening.port)},
+        started + std::chrono::seconds(20), {}, {}, error);
+    const auto elapsed = std::chrono::steady_clock::now() - started;
+    t.check(socket != openscp::libssh2detail::kInvalidSocket &&
+                elapsed < std::chrono::seconds(1),
+            "an address that refuses should not hold back the next one: " +
+                error);
+    if (socket != openscp::libssh2detail::kInvalidSocket)
+        openscp::libssh2detail::closeSocket(socket);
+}
+
+OPENSCP_TEST(test_tcp_connect_goes_on_past_an_address_that_never_answers, t) {
+    std::string error;
+    t.checkWithError(openscp::libssh2detail::initializeSockets(error),
+                     "sockets should start: ", error);
+    const LoopbackPort listening(true);
+    t.check(listening.port != 0, "the loopback port should listen");
+    const auto started = std::chrono::steady_clock::now();
+    const auto socket = openscp::libssh2detail::connectToFirstEndpoint(
+        {ipv4Endpoint(kUnreachableAddress, listening.port),
+         ipv4Endpoint(INADDR_LOOPBACK, listening.port)},
+        started + std::chrono::seconds(20), {}, {}, error);
+    const auto elapsed = std::chrono::steady_clock::now() - started;
+    t.check(socket != openscp::libssh2detail::kInvalidSocket &&
+                elapsed < std::chrono::seconds(2),
+            "an address that never answers should not hold back the next "
+            "one: " +
+                error);
+    if (socket != openscp::libssh2detail::kInvalidSocket)
+        openscp::libssh2detail::closeSocket(socket);
+}
+
+OPENSCP_TEST(test_tcp_connect_keeps_its_deadline_and_stops_when_asked, t) {
+    std::string error;
+    t.checkWithError(openscp::libssh2detail::initializeSockets(error),
+                     "sockets should start: ", error);
+    const auto started = std::chrono::steady_clock::now();
+    const auto timedOut = openscp::libssh2detail::connectToFirstEndpoint(
+        {ipv4Endpoint(kUnreachableAddress, 9)},
+        started + std::chrono::milliseconds(300), {}, {}, error);
+    const auto elapsed = std::chrono::steady_clock::now() - started;
+    // A network that refuses 192.0.2.1 at once shows neither the deadline nor
+    // a cancellation; the checks below would pass without either.
+    if (timedOut == openscp::libssh2detail::kInvalidSocket &&
+        elapsed < std::chrono::milliseconds(250)) {
+        t.skip("this network refuses 192.0.2.1 at once: " + error);
+        return;
+    }
+    t.check(timedOut == openscp::libssh2detail::kInvalidSocket &&
+                elapsed < std::chrono::seconds(1),
+            "connecting should end by its deadline: " + error);
+
+    std::stop_source cancellation;
+    std::string cancelError;
+    auto connecting = std::async(std::launch::async, [&] {
+        return openscp::libssh2detail::connectToFirstEndpoint(
+            {ipv4Endpoint(kUnreachableAddress, 9)},
+            std::chrono::steady_clock::now() + std::chrono::seconds(10),
+            cancellation.get_token(), {}, cancelError);
+    });
+    const bool pending = connecting.wait_for(std::chrono::milliseconds(100)) ==
+                         std::future_status::timeout;
+    cancellation.request_stop();
+    const bool stopped = connecting.wait_for(std::chrono::seconds(1)) ==
+                         std::future_status::ready;
+    t.check(pending && stopped &&
+                connecting.get() == openscp::libssh2detail::kInvalidSocket,
+            "connecting should stop soon after a cancellation");
+}
 
 fs::path makeTempFilePath(const std::string &tag) {
     const auto now =
@@ -278,6 +701,21 @@ fs::path makeTempFilePath(const std::string &tag) {
     std::error_code ec;
     fs::create_directories(dir, ec);
     return dir / (tag + ".txt");
+}
+
+// Makes `link` a link to the folder `target` that local operations must
+// refuse: a symbolic link on POSIX, and on Windows a junction, which needs no
+// privilege, unlike a symbolic link.
+bool createDirectoryLink(const fs::path &target, const fs::path &link) {
+#ifdef _WIN32
+    const std::wstring command = L"mklink /J \"" + link.wstring() + L"\" \"" +
+                                 target.wstring() + L"\" >NUL";
+    return _wsystem(command.c_str()) == 0;
+#else
+    std::error_code ec;
+    fs::create_directory_symlink(target, link, ec);
+    return !ec;
+#endif
 }
 
 bool readTextFile(const fs::path &path, std::string &out) {
@@ -505,6 +943,9 @@ OPENSCP_TEST(test_libssh2_input_safety, t) {
     error.clear();
     t.check(!validateEndpointHost("example.test:2222", "SSH host", error),
             "SSH hosts must keep ports in the dedicated field");
+    error.clear();
+    t.check(!validateEndpointHost("-oProxyCommand=true", "Jump host", error),
+            "a host must not look like an option of the ssh program");
 }
 
 OPENSCP_TEST(test_known_hosts_file_reads_every_line, t) {
@@ -537,6 +978,8 @@ OPENSCP_TEST(test_known_hosts_file_reads_every_line, t) {
         fs::permissions(path, fs::perms::owner_read | fs::perms::owner_write);
     }
 #endif
+    std::error_code ec;
+    fs::remove_all(path.parent_path(), ec);
 }
 
 OPENSCP_TEST(test_host_key_preference_starts_with_recorded_types, t) {
@@ -556,6 +999,25 @@ OPENSCP_TEST(test_host_key_preference_starts_with_recorded_types, t) {
                 "ecdsa-sha2-nistp256,ecdsa-sha2-nistp384,ssh-ed25519,"
                 "rsa-sha2-512,rsa-sha2-256,ecdsa-sha2-nistp521",
             "recorded types should keep the usual order among themselves");
+}
+
+OPENSCP_TEST(test_revoked_host_keys_are_found_whatever_hosts_they_name, t) {
+    namespace detail = openscp::libssh2detail;
+    const unsigned char raw[] = {1, 2, 3};   // AQID
+    const unsigned char other[] = {1, 2, 4}; // AQIE
+    t.check(detail::hostKeyRevoked({"  @revoked\t*.example k AQID comment"},
+                                   raw, sizeof(raw)),
+            "a @revoked line should revoke its key whatever hosts it names");
+    t.check(!detail::hostKeyRevoked({"h.example k AQID", "# @revoked * k AQID",
+                                     "@cert-authority * k AQID"},
+                                    raw, sizeof(raw)),
+            "only @revoked lines should revoke a key");
+    t.check(
+        !detail::hostKeyRevoked({"@revoked * k AQID"}, other, sizeof(other)),
+        "a @revoked line should revoke only its own key");
+    t.check(!detail::hostKeyRevoked({"@revokedx * k AQID", "@revoked * AQID"},
+                                    raw, sizeof(raw)),
+            "malformed @revoked lines should revoke nothing");
 }
 
 OPENSCP_TEST(test_known_hosts_lines_name_their_host, t) {
@@ -586,24 +1048,89 @@ OPENSCP_TEST(test_known_hosts_lines_name_their_host, t) {
     }
     std::string error;
     std::string content;
-    t.check(openscp::RemoveKnownHostEntry(path.string(), "h.example", 2222,
-                                          error) &&
-                readTextFile(path, content) && content == "kept k AQID\n",
-            "the hashed name should match its host: " + error);
+    t.checkWithError(openscp::RemoveKnownHostEntry(path.string(), "h.example",
+                                                   2222, error) &&
+                         readTextFile(path, content) &&
+                         content == "kept k AQID\n",
+                     "the hashed name should match its host: ", error);
+    std::error_code ec;
+    fs::remove_all(path.parent_path(), ec);
 }
 
-#ifndef _WIN32
+OPENSCP_TEST(test_local_entry_name_is_the_name_stored_on_disk, t) {
+    const fs::path stored = makeTempFilePath("Mixed-Case");
+    {
+        std::ofstream out(stored, std::ios::binary | std::ios::trunc);
+        out << "content";
+    }
+    const fs::path other = stored.parent_path() / "mixed-case.txt";
+    const std::string name =
+        openscp::localfiles::localEntryName(other.string());
+#if defined(_WIN32) || defined(__APPLE__)
+    // Their volumes ignore case, so the other spelling finds the file.
+    t.check(name == "Mixed-Case.txt",
+            "another spelling should give the stored name: " + name);
+#else
+    t.check(name.empty(), "a Linux volume should not find another spelling");
+#endif
+    t.check(openscp::localfiles::localEntryName(stored.string()) ==
+                    "Mixed-Case.txt" &&
+                openscp::localfiles::localEntryName(
+                    (stored.parent_path() / "missing.txt").string())
+                    .empty(),
+            "a stored name should come back as it is, and nothing for a "
+            "missing entry");
+    std::error_code ec;
+    fs::remove_all(stored.parent_path(), ec);
+}
+
+OPENSCP_TEST(test_known_hosts_path_reads_a_tilde_as_the_home_folder, t) {
+    // The connection dialog suggests ~/.ssh/known_hosts, which OpenSSH reads
+    // in the home folder; as it stands, the path names a folder called "~".
+    const fs::path home = makeTempFilePath("home").parent_path();
+    std::error_code ec;
+    fs::create_directories(home / ".ssh", ec);
+    {
+        std::ofstream out(home / ".ssh" / "known_hosts",
+                          std::ios::binary | std::ios::trunc);
+        out << "home.example ssh-ed25519 AQID\nkept k AQID\n";
+    }
+    {
+        openscp::testsupport::ScopedEnvironment environment;
+#ifdef _WIN32
+        environment.set("USERPROFILE", home.string());
+#else
+        environment.set("HOME", home.string());
+#endif
+        t.check(openscp::HasKnownHostEntry("~/.ssh/known_hosts", "home.example",
+                                           22),
+                "a path from ~ should find the entry in the home folder");
+        std::string error;
+        std::string content;
+        t.checkWithError(
+            openscp::RemoveKnownHostEntry("~/.ssh/known_hosts", "home.example",
+                                          22, error) &&
+                readTextFile(home / ".ssh" / "known_hosts", content) &&
+                content == "kept k AQID\n",
+            "a path from ~ should remove the entry from the home folder: ",
+            error);
+    }
+    fs::remove_all(home, ec);
+}
+
 OPENSCP_TEST(test_known_hosts_append_keeps_the_rest_of_the_file, t) {
     namespace detail = openscp::libssh2detail;
     const fs::path folder =
         makeTempFilePath("known-hosts-append").parent_path() / "append-folder";
     std::error_code ec;
     fs::create_directories(folder, ec);
+#ifndef _WIN32
     fs::permissions(folder,
                     fs::perms::owner_all | fs::perms::group_read |
                         fs::perms::group_exec | fs::perms::others_read |
                         fs::perms::others_exec,
                     ec);
+#endif
     const fs::path path = folder / "known_hosts";
     const std::string original =
         "# keep me\n\nmulti.example,10.0.0.9 ssh-ed25519 AQID";
@@ -611,18 +1138,21 @@ OPENSCP_TEST(test_known_hosts_append_keeps_the_rest_of_the_file, t) {
         std::ofstream out(path, std::ios::binary | std::ios::trunc);
         out << original;
     }
+#ifndef _WIN32
     fs::permissions(path,
                     fs::perms::owner_read | fs::perms::owner_write |
                         fs::perms::group_read | fs::perms::others_read,
                     ec);
+#endif
     std::string error;
-    t.check(detail::appendKnownHostsLine(path.string(), "new.example k AQID",
-                                         error),
-            "a line should be appended: " + error);
+    t.checkWithError(detail::appendKnownHostsLine(path.string(),
+                                                  "new.example k AQID", error),
+                     "a line should be appended: ", error);
     std::string content;
     t.check(readTextFile(path, content) &&
                 content == original + "\nnew.example k AQID\n",
             "the file should keep its lines and gain the new one: " + content);
+#ifndef _WIN32
     struct ::stat fileStat {};
     struct ::stat folderStat {};
     t.check(::stat(path.c_str(), &fileStat) == 0 &&
@@ -630,29 +1160,44 @@ OPENSCP_TEST(test_known_hosts_append_keeps_the_rest_of_the_file, t) {
                 ::stat(folder.c_str(), &folderStat) == 0 &&
                 (folderStat.st_mode & 0777) == 0755,
             "appending should keep the file's and the folder's permissions");
+#endif
 
     const fs::path link = folder / "linked_known_hosts";
     fs::create_symlink(path, link, ec);
-    t.check(!ec &&
-                detail::appendKnownHostsLine(link.string(), "via.link k AQID",
-                                             error) &&
-                fs::is_symlink(link) && readTextFile(path, content) &&
-                content.size() >= 16 &&
-                content.compare(content.size() - 16, 16, "via.link k AQID\n") ==
-                    0,
-            "a symbolic link should stay a link and its target gain the line");
+#ifdef _WIN32
+    // Only administrators, or Developer Mode, may make symbolic links.
+    const bool linked = !ec;
+    if (!linked)
+        t.skip("appending through a link needs symbolic links");
+#else
+    const bool linked = true;
+#endif
+    if (linked) {
+        t.check(!ec &&
+                    detail::appendKnownHostsLine(link.string(),
+                                                 "via.link k AQID", error) &&
+                    fs::is_symlink(link) && readTextFile(path, content) &&
+                    content.size() >= 16 &&
+                    content.compare(content.size() - 16, 16,
+                                    "via.link k AQID\n") == 0,
+                "a symbolic link should stay a link and its target gain the "
+                "line");
+    }
 
     const fs::path created = folder / "new-ssh" / "known_hosts";
-    t.check(
+    t.checkWithError(
         detail::appendKnownHostsLine(created.string(), "first k AQID", error) &&
-            readTextFile(created, content) && content == "first k AQID\n" &&
-            ::stat(created.c_str(), &fileStat) == 0 &&
-            (fileStat.st_mode & 0777) == 0600 &&
-            ::stat(created.parent_path().c_str(), &folderStat) == 0 &&
-            (folderStat.st_mode & 0777) == 0700,
-        "a missing file and folder should be created private: " + error);
-}
+            readTextFile(created, content) && content == "first k AQID\n",
+        "a missing file and folder should be created: ", error);
+#ifndef _WIN32
+    t.check(::stat(created.c_str(), &fileStat) == 0 &&
+                (fileStat.st_mode & 0777) == 0600 &&
+                ::stat(created.parent_path().c_str(), &folderStat) == 0 &&
+                (folderStat.st_mode & 0777) == 0700,
+            "a missing file and folder should be created private");
 #endif
+    fs::remove_all(folder.parent_path(), ec);
+}
 
 OPENSCP_TEST(test_safe_local_partial_files, t) {
     const fs::path target = makeTempFilePath("safe-target");
@@ -664,21 +1209,32 @@ OPENSCP_TEST(test_safe_local_partial_files, t) {
         output << "preserve-me";
     }
 
-#ifndef _WIN32
     fs::create_symlink(target, partial, ec);
+#ifdef _WIN32
+    // Only administrators, or Developer Mode, may make symbolic links.
+    const bool symlinked = !ec;
+    if (!symlinked)
+        t.skip("refusing a partial symbolic link needs symbolic links");
+#else
+    const bool symlinked = true;
     t.check(!ec, "symlink fixture should be created");
+#endif
     std::string symlinkError;
-    openscp::UniqueFile unsafe(openscp::localfiles::openRegularFileForWrite(
-        partial.string(), openscp::localfiles::WriteMode::Truncate,
-        symlinkError));
-    t.check(!unsafe,
-            "local partial files must reject final-component symlinks");
+    openscp::UniqueFile unsafe;
     std::string preservedContents;
-    t.check(readTextFile(target, preservedContents) &&
-                preservedContents == "preserve-me",
-            "rejecting a partial symlink must preserve its target");
-    fs::remove(partial, ec);
+    if (symlinked) {
+        unsafe.reset(openscp::localfiles::openRegularFileForWrite(
+            partial.string(), openscp::localfiles::WriteMode::Truncate,
+            symlinkError));
+        t.check(!unsafe,
+                "local partial files must reject final-component symlinks");
+        t.check(readTextFile(target, preservedContents) &&
+                    preservedContents == "preserve-me",
+                "rejecting a partial symlink must preserve its target");
+        fs::remove(partial, ec);
+    }
 
+    // A hard link needs no privilege on Windows either.
     fs::create_hard_link(target, partial, ec);
     t.check(!ec, "hard-link fixture should be created");
     symlinkError.clear();
@@ -691,7 +1247,6 @@ OPENSCP_TEST(test_safe_local_partial_files, t) {
                 preservedContents == "preserve-me",
             "rejecting a partial hard link must preserve its target");
     fs::remove(partial, ec);
-#endif
 
     std::string error;
     openscp::UniqueFile file(openscp::localfiles::openRegularFileForWrite(
@@ -703,13 +1258,13 @@ OPENSCP_TEST(test_safe_local_partial_files, t) {
         t.check(std::fwrite(payload, 1, sizeof(payload) - 1, file.get()) ==
                     sizeof(payload) - 1,
                 "safe partial file should be writable");
-        t.check(openscp::localfiles::flushAndSync(file.get(), error),
-                std::string("safe partial file should sync: ") + error);
+        t.checkWithError(openscp::localfiles::flushAndSync(file.get(), error),
+                         "safe partial file should sync: ", error);
         file.reset();
-        t.check(openscp::localfiles::atomicReplace(partial.string(),
-                                                   target.string(), error),
-                std::string("safe partial file should publish atomically: ") +
-                    error);
+        t.checkWithError(
+            openscp::localfiles::atomicReplace(partial.string(),
+                                               target.string(), error),
+            "safe partial file should publish atomically: ", error);
     }
     std::string targetContents;
     t.check(readTextFile(target, targetContents) &&
@@ -741,8 +1296,59 @@ OPENSCP_TEST(test_safe_local_partial_files, t) {
     fs::remove_all(target.parent_path(), ec);
 }
 
+// Downloads used to stay at the partial file's 0600, and replacing a file took
+// its mode away.
+OPENSCP_TEST(test_downloads_get_the_umask_or_the_replaced_mode, t) {
+#ifdef _WIN32
+    t.skip("Windows files have no permission bits.");
+#else
+    const mode_t mask = ::umask(0);
+    ::umask(mask);
+    const auto expected = [mask](unsigned mode) {
+        return mode & ~static_cast<unsigned>(mask) & 0777u;
+    };
+    const fs::path target = makeTempFilePath("download-mode");
+    const fs::path partial = target.string() + ".part";
+    const auto publish = [&](std::optional<std::uint32_t> remoteMode) {
+        std::string error;
+        openscp::UniqueFile file(openscp::localfiles::openRegularFileForWrite(
+            partial.string(), openscp::localfiles::WriteMode::Truncate, error));
+        if (!file)
+            return false;
+        file.reset();
+        openscp::localfiles::applyDownloadPermissions(
+            partial.string(), target.string(), remoteMode);
+        return openscp::localfiles::atomicReplace(partial.string(),
+                                                  target.string(), error);
+    };
+    const auto modeOf = [&target] {
+        struct stat metadata {};
+        return ::stat(target.c_str(), &metadata) == 0
+                   ? static_cast<unsigned>(metadata.st_mode) & 0777u
+                   : 07777u;
+    };
+    std::error_code ec;
+
+    t.check(publish(std::nullopt) && modeOf() == expected(0666u),
+            "a new download without a remote mode should get 0666 less the "
+            "umask");
+    fs::remove(target, ec);
+    t.check(publish(0755u) && modeOf() == expected(0755u),
+            "a new download should keep the remote mode less the umask");
+    fs::remove(target, ec);
+    t.check(publish(0444u) && modeOf() == expected(0644u),
+            "a new download should stay writable by its owner");
+    t.check(::chmod(target.c_str(), 0750) == 0 && publish(0644u) &&
+                modeOf() == 0750u,
+            "a download that replaces a file should keep that file's mode");
+    fs::remove_all(target.parent_path(), ec);
+#endif
+}
+
 OPENSCP_TEST(test_safe_local_partial_fifos, t) {
-#ifndef _WIN32
+#ifdef _WIN32
+    t.skip("Windows has no FIFOs among its files.");
+#else
     const fs::path partial = makeTempFilePath("fifo").string() + ".part";
     t.check(::mkfifo(partial.c_str(), 0600) == 0,
             "partial FIFO fixture should be created");
@@ -826,7 +1432,6 @@ OPENSCP_TEST(test_safe_local_regular_write_modes, t) {
 }
 
 OPENSCP_TEST(test_safe_local_source_cleanup_preserves_data, t) {
-#ifndef _WIN32
     const fs::path source = makeTempFilePath("move-source");
     std::ofstream(source, std::ios::binary) << "uploaded-original";
     openscp::localfiles::LocalFileIdentity identity;
@@ -834,6 +1439,24 @@ OPENSCP_TEST(test_safe_local_source_cleanup_preserves_data, t) {
     t.check(openscp::localfiles::localFileIdentity(source.string(), identity,
                                                    error),
             "move cleanup should capture the uploaded source identity");
+#ifdef _WIN32
+    // Windows holds the source open against changes while it compares and
+    // deletes it, so an unchanged source goes.
+    t.check(openscp::localfiles::removeLocalFileIfUnchanged(source.string(),
+                                                            identity, error) &&
+                error.empty() && !fs::exists(source),
+            "an unchanged source should be removed");
+    std::error_code ec;
+    std::ofstream(source, std::ios::binary) << "replacement";
+    t.check(!openscp::localfiles::removeLocalFileIfUnchanged(source.string(),
+                                                             identity, error) &&
+                errno == EAGAIN && !error.empty(),
+            "a replacement source must not be accepted for cleanup");
+    std::string contents;
+    t.check(readTextFile(source, contents) && contents == "replacement",
+            "a replacement entry must remain intact");
+    fs::remove(source, ec);
+#else
     for (int attempt = 0; attempt < 2; ++attempt) {
         t.check(
             !openscp::localfiles::removeLocalFileIfUnchanged(source.string(),
@@ -856,24 +1479,23 @@ OPENSCP_TEST(test_safe_local_source_cleanup_preserves_data, t) {
     t.check(readTextFile(source, contents) && contents == "replacement",
             "a replacement entry must remain intact");
     fs::remove(source, ec);
+#endif
     t.check(openscp::localfiles::removeLocalFileIfUnchanged(source.string(),
                                                             identity, error) &&
                 error.empty(),
             "cleanup should finish once the source has been removed manually");
     fs::remove_all(source.parent_path(), ec);
-#endif
 }
 
 OPENSCP_TEST(test_safe_local_parent_symlinks, t) {
-#ifndef _WIN32
     const fs::path base = makeTempFilePath("parent-symlink").parent_path();
     const fs::path selected = base / "selected";
     const fs::path outside = base / "outside";
     std::error_code ec;
     fs::create_directories(selected, ec);
     fs::create_directories(outside, ec);
-    fs::create_directory_symlink(outside, selected / "linked", ec);
-    t.check(!ec, "parent symlink fixture should be created");
+    t.check(createDirectoryLink(outside, selected / "linked"),
+            "parent symlink fixture should be created");
 
     std::string error;
     openscp::UniqueFile escaped(openscp::localfiles::openRegularFileForWrite(
@@ -916,8 +1538,8 @@ OPENSCP_TEST(test_safe_local_parent_symlinks, t) {
         outsidePartial << "outside";
     }
     fs::rename(selected / "real", selected / "moved", ec);
-    fs::create_directory_symlink(outside, selected / "real", ec);
-    t.check(!ec, "swapped parent symlink fixture should be created");
+    t.check(!ec && createDirectoryLink(outside, selected / "real"),
+            "swapped parent symlink fixture should be created");
     error.clear();
     t.check(!openscp::localfiles::atomicReplace(
                 (selected / "real" / "item.part").string(),
@@ -926,7 +1548,6 @@ OPENSCP_TEST(test_safe_local_parent_symlinks, t) {
                 fs::exists(outside / "item.part"),
             "publishing a partial file must reject a swapped parent symlink");
     fs::remove_all(base, ec);
-#endif
 }
 
 OPENSCP_TEST(test_protocol_helpers, t) {
@@ -1162,6 +1783,26 @@ OPENSCP_TEST(test_protocol_helpers, t) {
     t.check(openscp::normalizeWebDavBasePath("/dav/root/../files") ==
                 "/dav/files",
             "WebDAV base paths should resolve dot segments");
+    // A base copied from a URL used to be encoded a second time, so the
+    // server got "john%2540example.com" and answered 404.
+    t.check(openscp::webDavBasePathFromText(
+                "/remote.php/dav/files/john%40example.com/My%20Files") ==
+                "/remote.php/dav/files/john@example.com/My Files",
+            "WebDAV base paths should decode the escapes of a URL");
+    t.check(openscp::webDavBasePathFromText("/caf%c3%a9") == "/caf\xc3\xa9",
+            "WebDAV base paths should decode escapes in either case");
+    t.check(openscp::webDavBasePathFromText("/100%25/%zz/%4") == "/100%/%zz/%4",
+            "WebDAV base paths should keep a '%' that starts no escape");
+    // Decoding a decoded path again turned a folder named "a%20b" into
+    // "a b": it could not be reached, and saving the site renamed it.
+    for (const std::string path :
+         {"/files/a%20b", "/100%/x", "/a%%41", "/end%4", "/caf\xc3\xa9"}) {
+        t.check(openscp::normalizeWebDavBasePath(path) == path &&
+                    openscp::webDavBasePathFromText(
+                        openscp::webDavBasePathToText(path)) == path,
+                "a WebDAV base path should keep its own percent signs: " +
+                    path);
+    }
 
     [[maybe_unused]] const openscp::ProtocolCapabilities managedFiles{
         .implemented = true,
@@ -1425,6 +2066,140 @@ OPENSCP_TEST(test_curlftp_listing_skips_list_after_a_data_failure, t) {
     ::shutdown(listener, SHUT_RDWR);
     ::close(listener);
     server.join();
+}
+
+OPENSCP_TEST(test_curlftp_uploads_to_one_folder_without_changing_folder, t) {
+    // Each upload used to walk from the root one folder at a time, and its
+    // rename went back to the root: 6 CWD per file four levels deep.
+    const int listener = ::socket(AF_INET, SOCK_STREAM, 0);
+    sockaddr_in address{};
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    socklen_t length = sizeof(address);
+    const bool listening =
+        listener >= 0 &&
+        ::bind(listener, reinterpret_cast<sockaddr *>(&address),
+               sizeof(address)) == 0 &&
+        ::listen(listener, 4) == 0 &&
+        ::getsockname(listener, reinterpret_cast<sockaddr *>(&address),
+                      &length) == 0;
+    t.check(listening, "the fake FTP server should listen");
+    if (!listening) {
+        if (listener >= 0)
+            ::close(listener);
+        return;
+    }
+    std::atomic<int> cwdCommands{0};
+    std::thread server([listener, &cwdCommands] {
+        for (;;) {
+            const int client = ::accept(listener, nullptr, nullptr);
+            if (client < 0)
+                return;
+            const auto reply = [client](const std::string &line) {
+                const std::string text = line + "\r\n";
+                (void)::send(client, text.data(), text.size(), 0);
+            };
+            reply("220 fake");
+            int data = -1;
+            std::string pending;
+            char buffer[512];
+            for (;;) {
+                const std::size_t end = pending.find("\r\n");
+                if (end == std::string::npos) {
+                    const ssize_t n = ::recv(client, buffer, sizeof(buffer), 0);
+                    if (n <= 0)
+                        break;
+                    pending.append(buffer, static_cast<std::size_t>(n));
+                    continue;
+                }
+                const std::string command = pending.substr(0, end);
+                pending.erase(0, end + 2);
+                const std::string verb = command.substr(0, command.find(' '));
+                if (verb == "USER") {
+                    reply("331 password");
+                } else if (verb == "PASS") {
+                    reply("230 logged in");
+                } else if (verb == "PWD") {
+                    reply("257 \"/\" is the current directory");
+                } else if (verb == "CWD") {
+                    ++cwdCommands;
+                    reply("250 ok");
+                } else if (verb == "TYPE") {
+                    reply("200 ok");
+                } else if (verb == "EPSV") {
+                    sockaddr_in dataAddress{};
+                    dataAddress.sin_family = AF_INET;
+                    dataAddress.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+                    socklen_t dataLength = sizeof(dataAddress);
+                    data = ::socket(AF_INET, SOCK_STREAM, 0);
+                    (void)::bind(data,
+                                 reinterpret_cast<sockaddr *>(&dataAddress),
+                                 sizeof(dataAddress));
+                    (void)::listen(data, 1);
+                    (void)::getsockname(
+                        data, reinterpret_cast<sockaddr *>(&dataAddress),
+                        &dataLength);
+                    reply("229 Entering Extended Passive Mode (|||" +
+                          std::to_string(ntohs(dataAddress.sin_port)) + "|)");
+                } else if (verb == "STOR") {
+                    reply("150 ok");
+                    const int stream = ::accept(data, nullptr, nullptr);
+                    while (stream >= 0 &&
+                           ::recv(stream, buffer, sizeof(buffer), 0) > 0) {
+                    }
+                    if (stream >= 0)
+                        ::close(stream);
+                    ::close(data);
+                    data = -1;
+                    reply("226 stored");
+                } else if (verb == "RNFR") {
+                    reply("350 ready");
+                } else if (verb == "RNTO") {
+                    reply("250 renamed");
+                } else if (verb == "QUIT") {
+                    reply("221 bye");
+                    break;
+                } else {
+                    reply("502 not implemented");
+                }
+            }
+            if (data >= 0)
+                ::close(data);
+            ::close(client);
+        }
+    });
+
+    const fs::path local =
+        fs::temp_directory_path() / "openscp_ftp_one_folder_upload.txt";
+    {
+        std::ofstream out(local);
+        out << "payload\n";
+    }
+    openscp::CurlFtpClient client(openscp::Protocol::Ftp);
+    openscp::SessionOptions opt;
+    opt.protocol = openscp::Protocol::Ftp;
+    opt.host = "127.0.0.1";
+    opt.port = ntohs(address.sin_port);
+    opt.username = "alice";
+    opt.password = openscp::SecureString("secret");
+    std::string err;
+    const bool first =
+        client.connect(opt, err) &&
+        client.put(local.string(), "/a/b/c/d/first.txt", err, {}, {}, false);
+    t.check(first, "the first upload should succeed: " + err);
+    const int before = cwdCommands.load();
+    const bool second =
+        first &&
+        client.put(local.string(), "/a/b/c/d/second.txt", err, {}, {}, false);
+    t.check(second && cwdCommands.load() == before,
+            "a second upload to the same folder should change no folder: " +
+                std::to_string(cwdCommands.load() - before) + " CWD, " + err);
+    client.disconnect();
+    ::shutdown(listener, SHUT_RDWR);
+    ::close(listener);
+    server.join();
+    std::error_code removeError;
+    fs::remove(local, removeError);
 }
 #endif
 
@@ -2027,21 +2802,85 @@ OPENSCP_TEST(test_libssh2_recent_remote_modification, t) {
         "an out-of-range modification time should use the full check");
 }
 
-#ifdef _WIN32
-OPENSCP_TEST(test_libssh2_rejects_jump_on_windows, t) {
-    openscp::Libssh2SftpClient c;
-    openscp::SessionOptions opt = validOptions();
-    opt.jump_host = std::string("bastion.example.test");
-    opt.jump_port = 22;
+OPENSCP_TEST(test_partial_names_fit_the_name_limit, t) {
+    t.check(openscp::partialPathFor("/remote/report.pdf") ==
+                "/remote/report.pdf.part",
+            "a short name should just take the suffix");
+    const std::string fits(250, 'a');
+    t.check(openscp::partialPathFor("/dir/" + fits) == "/dir/" + fits + ".part",
+            "a name with room for the suffix should keep it all");
 
-    std::string err;
-    const bool ok = c.connect(opt, err);
-    t.check(!ok, "connect should fail when jump is configured on Windows");
-    t.checkContains(err, "not supported on this platform",
-                    "connect should explain jump is unsupported on Windows");
+    // A name of 251 to 255 bytes has no room for ".part".
+    const std::string tooLong(251, 'a');
+    const std::string partial = openscp::partialPathFor("/dir/" + tooLong);
+    const std::string partialName = partial.substr(std::string("/dir/").size());
+    t.check(partial.rfind("/dir/", 0) == 0 && partialName.size() == 255 &&
+                partialName.rfind(std::string(233, 'a') + "~", 0) == 0 &&
+                partialName.ends_with(".part"),
+            "a long name should keep its start and fit, got: " + partialName);
+    t.check(openscp::partialPathFor("/dir/" + tooLong) == partial,
+            "a name should always get the same partial file");
+    t.check(openscp::partialPathFor("/dir/" + std::string(250, 'a') + "b") !=
+                partial,
+            "two long names should not share a partial file");
+
+    // 85 characters of three bytes: 255 bytes, cut between characters.
+    std::string wide;
+    for (int character = 0; character < 85; ++character)
+        wide += "\xe6\x96\x87";
+    const std::string widePartial = openscp::partialPathFor(wide);
+    t.check(widePartial.size() == 231 + 1 + 16 + 5 &&
+                widePartial.compare(0, 231, wide, 0, 231) == 0 &&
+                widePartial[231] == '~',
+            "a long name should be cut between its characters");
 }
-#else
-OPENSCP_TEST(test_libssh2_jump_host_spawn_posix, t) {
+
+OPENSCP_TEST(test_harness_names_the_failing_case, t) {
+    // A failure names its case, which the harness can then run on its own.
+    openscp::test::TestContext example;
+    example.caseName = "test_example";
+    std::ostringstream output;
+    std::streambuf *const previous = std::cerr.rdbuf(output.rdbuf());
+    example.check(false, "it failed");
+    std::cerr.rdbuf(previous);
+    t.check(example.failures == 1 &&
+                output.str() == "[FAIL] test_example: it failed\n",
+            "a failure should name its case, got: " + output.str());
+
+    std::vector<std::string> unknown;
+    const auto cases = openscp::test::TestHarness::casesNamed(
+        {"test_harness_names_the_failing_case", "test_that_is_not_here"},
+        unknown);
+    t.check(cases.size() == 1 &&
+                cases.front()->name == "test_harness_names_the_failing_case" &&
+                unknown == std::vector<std::string>{"test_that_is_not_here"},
+            "the harness should pick the cases named and report the others");
+}
+
+OPENSCP_TEST(test_integration_runs_can_require_every_check, t) {
+    // The SFTP checks of known_hosts need ssh-keyscan. When it failed on a
+    // runner, they were left out and the job still passed.
+    openscp::test::TestContext suite;
+    std::ostringstream output;
+    std::streambuf *const previousError = std::cerr.rdbuf(output.rdbuf());
+    std::streambuf *const previousOutput = std::cout.rdbuf(output.rdbuf());
+    suite.skip("a check that needs a tool");
+    openscp::testsupport::ScopedEnvironment environment;
+    environment.set("OPENSCP_IT_REQUIRE_ALL_CHECKS", "");
+    const int allowed = openscp::testsupport::finishIntegration("suite", suite);
+    environment.set("OPENSCP_IT_REQUIRE_ALL_CHECKS", "1");
+    const int required =
+        openscp::testsupport::finishIntegration("suite", suite);
+    std::cout.rdbuf(previousOutput);
+    std::cerr.rdbuf(previousError);
+    t.check(allowed == EXIT_SUCCESS,
+            "a skipped check alone should not fail a run");
+    t.check(required == EXIT_FAILURE,
+            "a run that requires every check should fail when one was "
+            "skipped");
+}
+
+OPENSCP_TEST(test_libssh2_jump_host_spawn, t) {
     openscp::Libssh2SftpClient c;
     openscp::SessionOptions opt = validOptions();
     opt.jump_host = std::string("127.0.0.1");
@@ -2055,7 +2894,372 @@ OPENSCP_TEST(test_libssh2_jump_host_spawn_posix, t) {
     t.check(!err.empty(), "connect error should not be empty");
     t.check(!c.isConnected(), "client should remain disconnected");
 }
+
+#ifndef _WIN32
+OPENSCP_TEST(test_jump_host_in_brackets_reaches_ssh_as_an_address, t) {
+    // A stand-in for ssh, first in PATH, that writes down its arguments.
+    const fs::path arguments = makeTempFilePath("jump-arguments");
+    const fs::path standIn = arguments.parent_path() / "ssh";
+    {
+        std::ofstream script(standIn);
+        script << "#!/bin/sh\nprintf '%s\\n' \"$@\" > '" << arguments.string()
+               << "'\n";
+    }
+    std::error_code ec;
+    fs::permissions(standIn, fs::perms::owner_all, ec);
+    std::string error;
+    {
+        openscp::testsupport::ScopedEnvironment environment;
+        const char *path = std::getenv("PATH");
+        environment.set("PATH", standIn.parent_path().string() + ":" +
+                                    (path ? path : ""));
+        openscp::Libssh2SftpClient client;
+        openscp::SessionOptions options = validOptions();
+        options.host = "127.0.0.1";
+        options.jump_host = std::string("[2001:db8::1]");
+        options.jump_port = 22;
+        (void)client.connect(options, error);
+    }
+    std::string last;
+    std::ifstream written(arguments);
+    for (std::string line; std::getline(written, line);)
+        last = line;
+    fs::remove_all(arguments.parent_path(), ec);
+    t.check(last == "2001:db8::1",
+            "ssh should get the jump address without brackets, got: " + last);
+}
+
+OPENSCP_TEST(test_jump_ssh_keeps_only_its_standard_streams, t) {
+    // Another thread may be making descriptors, such as another tunnel's,
+    // that are not close-on-exec yet. An ssh that kept one would keep that
+    // connection open after its own ssh exits.
+    const fs::path listing = makeTempFilePath("jump-descriptors");
+    const fs::path standIn = listing.parent_path() / "ssh";
+    {
+        std::ofstream script(standIn);
+        script << "#!/bin/sh\nls /dev/fd/ > '" << listing.string() << "'\n";
+    }
+    std::error_code ec;
+    fs::permissions(standIn, fs::perms::owner_all, ec);
+    int straggler[2] = {-1, -1};
+    t.check(::pipe(straggler) == 0, "a pipe should be created");
+    // A number that ls does not take for itself.
+    const int strayDescriptor = ::fcntl(straggler[1], F_DUPFD, 100);
+    std::string error;
+    {
+        openscp::testsupport::ScopedEnvironment environment;
+        const char *path = std::getenv("PATH");
+        environment.set("PATH", standIn.parent_path().string() + ":" +
+                                    (path ? path : ""));
+        openscp::Libssh2SftpClient client;
+        openscp::SessionOptions options = validOptions();
+        options.host = "127.0.0.1";
+        options.jump_host = std::string("jump.example");
+        options.jump_port = 22;
+        (void)client.connect(options, error);
+    }
+    std::vector<std::string> open;
+    std::ifstream written(listing);
+    for (std::string line; std::getline(written, line);)
+        open.push_back(line);
+    ::close(straggler[0]);
+    ::close(straggler[1]);
+    ::close(strayDescriptor);
+    fs::remove_all(listing.parent_path(), ec);
+    const auto has = [&open](const std::string &descriptor) {
+        return std::find(open.begin(), open.end(), descriptor) != open.end();
+    };
+    t.check(strayDescriptor > STDERR_FILENO && has("0") && has("2") &&
+                !has(std::to_string(strayDescriptor)),
+            "ssh should start with its standard streams and none of the "
+            "descriptors other threads leave open");
+}
 #endif
+
+#ifdef _WIN32
+OPENSCP_TEST(test_windows_local_files_open_past_max_path, t) {
+    // Downloads make folders and files relative to their parents, so they
+    // reach paths past MAX_PATH even where the system does not enable long
+    // paths; uploads and integrity checks then open them by the whole path.
+    const fs::path base = makeTempFilePath("long-path").parent_path();
+    fs::path folder = base;
+    while (folder.native().size() <= MAX_PATH)
+        folder /= std::string(40, 'd');
+    const fs::path file = folder / "file.txt";
+    std::string error;
+    t.checkWithError(
+        openscp::localfiles::ensureLocalDirectories(folder.string(), error),
+        "the long folders should be made: ", error);
+    openscp::UniqueFile written(openscp::localfiles::openRegularFileForWrite(
+        file.string(), openscp::localfiles::WriteMode::Truncate, error));
+    t.checkWithError(written && std::fputs("long", written.get()) >= 0 &&
+                         written.close() == 0,
+                     "the long file should be written: ", error);
+
+    const auto opens = [](const std::string &path) {
+        return static_cast<bool>(
+            openscp::UniqueFile(openscp::openLocalFile(path, "rb")));
+    };
+    t.check(opens(file.string()),
+            "a file past MAX_PATH should open for reading");
+    // Windows turns "/" into "\" and drops "." names, but not in the form
+    // with the \\?\ prefix that reaches past MAX_PATH.
+    t.check(opens((folder / "." / "file.txt").generic_string()),
+            "a path past MAX_PATH with \"/\" and \".\" should open too");
+    std::uint64_t size = 0;
+    std::string why;
+    const bool sized =
+        openscp::libssh2detail::getLocalFileSize(file.string(), size, &why);
+    t.checkWithError(sized && size == 4,
+                     "a file past MAX_PATH should have its size: ", why);
+
+    // A relative path still starts at the current directory.
+    wchar_t previous[MAX_PATH];
+    const DWORD previousLength = ::GetCurrentDirectoryW(MAX_PATH, previous);
+    t.check(::SetCurrentDirectoryW(base.c_str()) != 0,
+            "the test should enter its folder");
+    t.check(opens(file.lexically_relative(base).string()),
+            "a relative path past MAX_PATH should open from the current "
+            "directory");
+    if (previousLength > 0 && previousLength < MAX_PATH)
+        ::SetCurrentDirectoryW(previous);
+
+    std::error_code ec;
+    fs::remove_all(L"\\\\?\\" + base.wstring(), ec);
+}
+
+OPENSCP_TEST(test_windows_short_names_are_refused_only_as_names, t) {
+    const fs::path base = makeTempFilePath("short-names").parent_path();
+    const fs::path archive = base / "Documents Archive";
+    std::error_code ec;
+    fs::create_directories(archive, ec);
+    wchar_t shortPath[MAX_PATH];
+    const DWORD length =
+        ::GetShortPathNameW(archive.c_str(), shortPath, MAX_PATH);
+    const fs::path alias =
+        length > 0 && length < MAX_PATH ? fs::path(shortPath) : fs::path();
+    if (alias.empty() || alias.filename() == archive.filename()) {
+        t.skip("the temporary folder's volume makes no short names");
+        fs::remove_all(base, ec);
+        return;
+    }
+    // A remote entry with that name would land in "Documents Archive".
+    t.check(!openscp::localfiles::localNameProblem(alias.filename().string())
+                 .empty(),
+            "a name equal to another entry's short name should be refused");
+    // A path the user gives may still reach a folder by its short name.
+    std::string error;
+    const bool followed = openscp::localfiles::ensureLocalDirectories(
+        (alias / "inside").string(), error);
+    t.checkWithError(
+        followed, "a short name in a whole path should be followed: ", error);
+    t.check(fs::is_directory(archive / "inside", ec),
+            "the short name should reach the long-named folder");
+    fs::remove_all(base, ec);
+}
+
+OPENSCP_TEST(test_windows_links_are_trusted_where_users_cannot_add, t) {
+    // ProgramData belongs to the system, but any user may add entries to it,
+    // so a link there may come from another account. A link in C:\Users,
+    // which users cannot change, is still followed; making one there needs an
+    // administrator, so this test cannot.
+    std::error_code ec;
+    const char *programData = std::getenv("ProgramData");
+    if (!programData) {
+        t.skip("no ProgramData folder");
+        return;
+    }
+    const fs::path target = makeTempFilePath("trust-target").parent_path();
+    const fs::path link =
+        fs::path(programData) /
+        ("openscp-trust-test-" + std::to_string(::GetCurrentProcessId()));
+    if (!createDirectoryLink(target, link)) {
+        t.skip("a junction could not be made in ProgramData");
+        fs::remove_all(target, ec);
+        return;
+    }
+    std::string error;
+    const bool followed = openscp::localfiles::ensureLocalDirectories(
+        (link / "inside").string(), error);
+    ::RemoveDirectoryW(link.c_str());
+    fs::remove_all(target, ec);
+    t.check(!followed && error.find("untrusted") != std::string::npos,
+            "a link where any user may add entries should be refused: " +
+                error);
+}
+
+OPENSCP_TEST(test_windows_jump_ssh_comes_from_absolute_path_folders, t) {
+    namespace detail = openscp::libssh2detail;
+    const fs::path base = makeTempFilePath("ssh-search").parent_path();
+    const fs::path current = base / "current";
+    const fs::path tools = base / "tools";
+    const fs::path empty = base / "empty";
+    std::error_code ec;
+    for (const fs::path &folder : {current, tools, empty})
+        fs::create_directories(folder, ec);
+    for (const fs::path &folder : {current, tools})
+        std::ofstream(folder / "ssh.exe", std::ios::binary) << "MZ";
+    const std::wstring missing = (base / "missing" / "ssh.exe").wstring();
+
+    // SearchPathW resolved "", "." and other relative entries against the
+    // current directory, where an ssh.exe would then run.
+    wchar_t previous[MAX_PATH];
+    const DWORD previousLength = ::GetCurrentDirectoryW(MAX_PATH, previous);
+    t.check(::SetCurrentDirectoryW(current.c_str()) != 0,
+            "the test should enter the folder that holds the decoy");
+    t.check(detail::findSshExecutable(L";.;relative;;C:relative;\\relative;" +
+                                          empty.wstring(),
+                                      missing)
+                .empty(),
+            "empty and relative PATH entries must not reach the current "
+            "directory");
+    t.check(detail::findSshExecutable(empty.wstring() + L";\"" +
+                                          tools.wstring() + L"\";" +
+                                          current.wstring(),
+                                      missing) == (tools / "ssh.exe").wstring(),
+            "the first absolute folder with ssh.exe should win, quoted or "
+            "not");
+    if (previousLength > 0 && previousLength < MAX_PATH)
+        ::SetCurrentDirectoryW(previous);
+
+    const std::wstring fallback = (tools / "ssh.exe").wstring();
+    t.check(detail::findSshExecutable(empty.wstring(), fallback) == fallback,
+            "without one in PATH, the fallback should be used");
+    t.check(detail::findSshExecutable(empty.wstring(), missing).empty(),
+            "a missing fallback should give no program");
+    fs::remove_all(base, ec);
+}
+
+OPENSCP_TEST(test_windows_jump_relay_carries_both_directions, t) {
+    namespace detail = openscp::libssh2detail;
+    // The argument probe stands in for ssh.exe, first in PATH, and echoes
+    // what it reads, as ssh -W relays a connection.
+    const fs::path folder =
+        makeTempFilePath("jump-relay").parent_path() / "probe";
+    std::error_code ec;
+    fs::create_directories(folder, ec);
+    fs::copy_file(OPENSCP_ARGV_PROBE, folder / "ssh.exe", ec);
+    t.check(!ec, "the probe should stand in for ssh.exe");
+    std::wstring previousPath(32767, L'\0');
+    previousPath.resize(::GetEnvironmentVariableW(
+        L"PATH", previousPath.data(), static_cast<DWORD>(previousPath.size())));
+    ::SetEnvironmentVariableW(L"PATH",
+                              (folder.wstring() + L";" + previousPath).c_str());
+    ::SetEnvironmentVariableW(L"OPENSCP_ARGV_PROBE_ECHO", L"relay ended");
+    {
+        detail::SshJumpTunnel tunnel;
+        detail::SocketHandle socket = detail::kInvalidSocket;
+        std::string error;
+        const bool started = tunnel.start(
+            {"-W", "target.example:22", "jump.example"}, socket, error);
+        t.checkWithError(started, "the relay should start: ", error);
+        if (started) {
+            const std::string sent = "SSH-2.0-relay\r\n";
+            t.check(detail::sendOnce(socket, sent.data(), sent.size()) ==
+                        static_cast<std::ptrdiff_t>(sent.size()),
+                    "libssh2's bytes should reach ssh.exe");
+            std::string received;
+            char buffer[64];
+            while (received.size() < sent.size()) {
+                const std::ptrdiff_t count =
+                    detail::receiveOnce(socket, buffer, sizeof(buffer));
+                if (count <= 0)
+                    break;
+                received.append(buffer, static_cast<std::size_t>(count));
+            }
+            t.check(received == sent,
+                    "ssh.exe's output should come back through the relay");
+            // As when libssh2 closes its end, ssh.exe's input ends.
+            detail::shutdownSocket(socket);
+            t.check(tunnel.exited(5000),
+                    "ssh.exe should exit once its input ends");
+            t.check(tunnel.errorOutput().find("relay ended") !=
+                        std::string::npos,
+                    "ssh.exe's error output should be kept");
+            detail::closeSocket(socket);
+        }
+    }
+    ::SetEnvironmentVariableW(L"PATH", previousPath.c_str());
+    ::SetEnvironmentVariableW(L"OPENSCP_ARGV_PROBE_ECHO", nullptr);
+    fs::remove_all(folder.parent_path(), ec);
+}
+
+OPENSCP_TEST(test_windows_jump_command_line_round_trips, t) {
+    const std::vector<std::wstring> arguments = {
+        L"-l",
+        L"jos\u00e9 luis",
+        L"-i",
+        L"C:\\Users\\Jos\u00e9 Luis\\.ssh\\id_ed25519",
+        L"-W",
+        L"[2001:db8::1]:22",
+        L"--",
+        L"bastion.example.test",
+        L"",
+        L"ends with a backslash\\",
+        L"quote\"inside",
+        L"backslashes\\\\ before a quote\\\"",
+        L"*?[]{}'~"};
+    const std::wstring program = L"C:\\Windows\\System32\\OpenSSH\\ssh.exe";
+    const std::wstring commandLine =
+        openscp::libssh2detail::windowsCommandLine(program, arguments);
+    int count = 0;
+    LPWSTR *parsed = ::CommandLineToArgvW(commandLine.c_str(), &count);
+    const bool programKept = parsed && count > 0 && program == parsed[0];
+    std::vector<std::wstring> readBack;
+    for (int index = 1; parsed && index < count; ++index)
+        readBack.emplace_back(parsed[index]);
+    if (parsed)
+        ::LocalFree(parsed);
+    t.check(programKept, "the program should stay the first argument");
+    t.check(readBack == arguments,
+            "the C runtime should read every argument back as given");
+}
+#endif
+
+// An "ssh-rsa" blob with exponent 65537 and a modulus of `modulusBytes`
+// bytes whose first byte is `top`, as an SSH server sends it.
+std::vector<unsigned char> rsaHostKeyBlob(std::size_t modulusBytes,
+                                          unsigned char top) {
+    std::vector<unsigned char> blob;
+    const auto appendField = [&blob](const std::vector<unsigned char> &data) {
+        const auto size = static_cast<std::uint32_t>(data.size());
+        for (const int shift : {24, 16, 8, 0})
+            blob.push_back(static_cast<unsigned char>((size >> shift) & 0xffu));
+        blob.insert(blob.end(), data.begin(), data.end());
+    };
+    appendField({'s', 's', 'h', '-', 'r', 's', 'a'});
+    appendField({0x01, 0x00, 0x01});
+    std::vector<unsigned char> modulus(modulusBytes, 0xa5);
+    modulus.front() = top;
+    if (top & 0x80u)
+        modulus.insert(modulus.begin(), 0x00);
+    appendField(modulus);
+    return blob;
+}
+
+// The new-host prompt used to show 2048-bit RSA keys as 2232-bit, the size of
+// the whole blob.
+OPENSCP_TEST(test_rsa_host_key_bits_come_from_the_modulus, t) {
+    using openscp::libssh2detail::rsaModulusBits;
+    for (const std::size_t bits : {2048u, 3072u, 4096u}) {
+        const auto blob = rsaHostKeyBlob(bits / 8, 0xc3);
+        t.check(rsaModulusBits(blob.data(), blob.size()) ==
+                    static_cast<int>(bits),
+                "an RSA host key should show its modulus size: " +
+                    std::to_string(bits));
+    }
+    const auto shortTop = rsaHostKeyBlob(256, 0x7f);
+    t.check(rsaModulusBits(shortTop.data(), shortTop.size()) == 2047,
+            "a modulus without its top bit should count one bit less");
+    const auto truncated = rsaHostKeyBlob(256, 0xc3);
+    t.check(rsaModulusBits(truncated.data(), truncated.size() - 1) == 0 &&
+                rsaModulusBits(nullptr, 0) == 0,
+            "a cut or missing blob should have no RSA size");
+    const std::vector<unsigned char> ed25519 = {
+        0, 0, 0, 11, 's', 's', 'h', '-', 'e', 'd', '2', '5', '5', '1', '9'};
+    t.check(rsaModulusBits(ed25519.data(), ed25519.size()) == 0,
+            "a key of another type should have no RSA size");
+}
 
 OPENSCP_TEST(test_remove_known_hosts_entry_plain_and_hashed, t) {
     const std::string key =
@@ -2088,6 +3292,77 @@ OPENSCP_TEST(test_remove_known_hosts_entry_plain_and_hashed, t) {
             "hashed example.com entry should be removed");
     t.check(content.find("other.example ssh-ed25519") != std::string::npos,
             "unrelated known_hosts entry should be preserved");
+
+    std::error_code ec;
+    fs::remove(khPath, ec);
+    fs::remove_all(khPath.parent_path(), ec);
+}
+
+// A site may keep an IPv6 address in brackets; known_hosts names it bare on
+// port 22 and as [address]:port on others.
+OPENSCP_TEST(test_known_hosts_entries_of_a_bracketed_ipv6_site, t) {
+    const std::string key =
+        "AAAAC3NzaC1lZDI1NTE5AAAAILZlz+tnMZZGpyX4/qwU9iIfMHkUqPnwGwGZRuQQ3v1d";
+    const fs::path khPath = makeTempFilePath("openscp-knownhosts-ipv6");
+    {
+        std::ofstream out(khPath, std::ios::binary | std::ios::trunc);
+        t.check(out.is_open(), "known_hosts IPv6 fixture should be writable");
+        if (!out.is_open())
+            return;
+        out << "2001:db8::1 ssh-ed25519 " << key << "\n";
+        out << "[2001:db8::1]:2222 ssh-ed25519 " << key << "\n";
+    }
+    t.check(
+        openscp::HasKnownHostEntry(khPath.string(), "[2001:db8::1]", 22) &&
+            openscp::HasKnownHostEntry(khPath.string(), "[2001:db8::1]", 2222),
+        "a bracketed IPv6 site should find its saved keys");
+    std::string err;
+    t.checkWithError(openscp::RemoveKnownHostEntry(khPath.string(),
+                                                   "[2001:db8::1]", 2222, err),
+                     "removing the key of a bracketed IPv6 site: ", err);
+    t.check(
+        openscp::HasKnownHostEntry(khPath.string(), "2001:db8::1", 22) &&
+            !openscp::HasKnownHostEntry(khPath.string(), "2001:db8::1", 2222),
+        "only the key of that port should go");
+    std::error_code ec;
+    fs::remove(khPath, ec);
+    fs::remove_all(khPath.parent_path(), ec);
+}
+
+// Deleting a site and its saved key used to delete the revocation of that key,
+// so trust on first use could then offer the revoked key as a new host.
+OPENSCP_TEST(test_remove_known_hosts_entry_keeps_marker_lines, t) {
+    const std::string key =
+        "AAAAC3NzaC1lZDI1NTE5AAAAILZlz+tnMZZGpyX4/qwU9iIfMHkUqPnwGwGZRuQQ3v1d";
+    const fs::path khPath = makeTempFilePath("openscp-knownhosts-markers");
+    {
+        std::ofstream out(khPath, std::ios::binary | std::ios::trunc);
+        t.check(out.is_open(), "known_hosts marker fixture should be writable");
+        if (!out.is_open())
+            return;
+        out << "@revoked example.com ssh-ed25519 " << key << "\n";
+        out << "@cert-authority example.com ssh-ed25519 " << key << "\n";
+    }
+    t.check(!openscp::HasKnownHostEntry(khPath.string(), "example.com", 22),
+            "marker lines should not count as a saved key of the host");
+
+    {
+        std::ofstream out(khPath, std::ios::binary | std::ios::app);
+        out << "example.com ssh-ed25519 " << key << "\n";
+    }
+    std::string err;
+    t.checkWithError(
+        openscp::RemoveKnownHostEntry(khPath.string(), "example.com", 22, err),
+        "removing the saved key should succeed: ", err);
+    std::string content;
+    t.check(readTextFile(khPath, content),
+            "updated known_hosts marker fixture should be readable");
+    t.check(content.find("\nexample.com ssh-ed25519") == std::string::npos,
+            "the saved key of the host should be removed");
+    t.check(content.find("@revoked example.com") != std::string::npos &&
+                content.find("@cert-authority example.com") !=
+                    std::string::npos,
+            "removing a saved key should keep revocations and CAs");
 
     std::error_code ec;
     fs::remove(khPath, ec);
@@ -2131,6 +3406,14 @@ OPENSCP_TEST(test_local_file_64bit_seek_and_size_large_offsets, t) {
     t.check(f != nullptr, "temporary file should open for write");
     if (!f)
         return;
+#ifdef _WIN32
+    // NTFS writes zeros up to the offset unless the file is sparse.
+    DWORD returned = 0;
+    // NOLINTNEXTLINE(performance-no-int-to-ptr): the CRT gives an integer.
+    (void)DeviceIoControl(reinterpret_cast<HANDLE>(_get_osfhandle(_fileno(f))),
+                          FSCTL_SET_SPARSE, nullptr, 0, nullptr, 0, &returned,
+                          nullptr);
+#endif
 
     // Offset greater than 2 GiB (3 GiB = 3 * 1024 * 1024 * 1024)
     constexpr std::uint64_t largeOffset = 3ULL * 1024 * 1024 * 1024;
@@ -2290,7 +3573,7 @@ OPENSCP_TEST(test_unique_sftp_handle_lifecycle_and_leak_prevention, t) {
 
 } // namespace
 
-int main() {
+int main(int argc, char **argv) {
     openscp::test::TestHarness harness("core");
-    return harness.run();
+    return harness.run(argc, argv);
 }

@@ -3,13 +3,17 @@
 #include "AppVersion.hpp"
 #include "logic/common/AppSettings.hpp"
 #include "logic/updates/AppImageInstaller.hpp"
+#include "logic/updates/WindowsSetupInstaller.hpp"
 
 #include <QCoreApplication>
 #include <QDateTime>
 #include <QDir>
+#include <QFile>
 #include <QNetworkReply>
 #include <QNetworkRequest>
+#include <QOperatingSystemVersion>
 #include <QRunnable>
+#include <QStandardPaths>
 #include <QThreadPool>
 #include <QTimer>
 
@@ -32,15 +36,29 @@ QString glibcVersion() {
     return {};
 #endif
 }
+// Downloaded Windows setups and their logs; a setup cannot be deleted while
+// it runs, so the next start removes it.
+QString windowsSetupDirectory() {
+    return QStandardPaths::writableLocation(
+               QStandardPaths::AppLocalDataLocation) +
+           QStringLiteral("/updates");
+}
 } // namespace
 
 UpdateController::UpdateController(QObject *parent,
                                    QNetworkAccessManager *network)
     : QObject(parent),
       network_(network ? network : new QNetworkAccessManager(this)),
+      windowsSetupScope_(windowsSetupScope()),
       installation_(detectUpdateInstallation()),
       publicKey_(QByteArray::fromBase64(
           QByteArrayLiteral(OPENSCP_UPDATE_PUBLIC_KEY))) {
+    if (installation_ == UpdateInstallation::WindowsSetup) {
+        const QDir directory(windowsSetupDirectory());
+        for (const QString &setup : directory.entryList(
+                 {QStringLiteral("openscp-setup-*.exe")}, QDir::Files))
+            QFile::remove(directory.filePath(setup));
+    }
 }
 
 UpdateController::~UpdateController() {
@@ -97,13 +115,15 @@ void UpdateController::request(
          completion = std::move(completion)] {
             QString error;
             if (*tooLarge || reply->bytesAvailable() > limit - buffer->size())
-                error =
-                    QStringLiteral("Update response exceeds its size limit.");
+                error = QCoreApplication::translate(
+                    "UpdateController",
+                    "Update response exceeds its size limit.");
             else if (reply->error() != QNetworkReply::NoError)
                 error = reply->errorString();
             else if (reply->attribute(QNetworkRequest::HttpStatusCodeAttribute)
                          .toInt() != 200)
-                error = QStringLiteral("Unexpected update server response.");
+                error = QCoreApplication::translate(
+                    "UpdateController", "Unexpected update server response.");
             else
                 buffer->append(reply->readAll());
             reply_ = nullptr;
@@ -115,16 +135,18 @@ void UpdateController::request(
 void UpdateController::check(bool manual) {
     if (restartRequired_) {
         if (manual)
-            emit checked(true,
-                         QStringLiteral("An update has been installed. Restart "
-                                        "OpenSCP before checking again."));
+            emit checked(true, QCoreApplication::translate(
+                                   "UpdateController",
+                                   "An update has been installed. Restart "
+                                   "OpenSCP before checking again."));
         return;
     }
     if (busy_) {
         if (manual)
-            emit checked(
-                true,
-                QStringLiteral("An update operation is already in progress."));
+            emit checked(true, QCoreApplication::translate(
+                                   "UpdateController",
+                                   "An update operation is already in "
+                                   "progress."));
         return;
     }
     AppSettings settings;
@@ -153,7 +175,8 @@ void UpdateController::check(bool manual) {
                 emit checked(manual, error);
                 return;
             }
-            if (installation_ != UpdateInstallation::AppImage ||
+            if ((installation_ != UpdateInstallation::AppImage &&
+                 installation_ != UpdateInstallation::WindowsSetup) ||
                 publicKey_.size() != 32 || !release->hasManifest) {
                 finishCheck(manual, *release);
                 return;
@@ -176,10 +199,9 @@ void UpdateController::check(bool manual) {
                                        const QString &signatureError) mutable {
                                 QString verificationError = signatureError;
                                 if (verificationError.isEmpty())
-                                    candidate.artifact = verifyUpdateManifest(
-                                        manifest, signature, publicKey_,
-                                        candidate.version, updateArchitecture(),
-                                        glibcVersion(), verificationError);
+                                    candidate.artifact = verifyManifest(
+                                        manifest, signature, candidate.version,
+                                        verificationError);
                                 // Invalid/missing signatures allow only
                                 // visiting the release page.
                                 finishCheck(manual, candidate);
@@ -199,21 +221,48 @@ void UpdateController::finishCheck(bool manual, const UpdateRelease &release) {
     emit available(release);
 }
 
+std::optional<UpdateArtifact>
+UpdateController::verifyManifest(const QByteArray &manifest,
+                                 const QByteArray &signature,
+                                 const QString &version, QString &error) const {
+    if (installation_ == UpdateInstallation::WindowsSetup) {
+        // On Windows, the micro version is the build number.
+        return verifyWindowsUpdateManifest(
+            manifest, signature, publicKey_, version, updateArchitecture(),
+            QOperatingSystemVersion::current().microVersion(), error);
+    }
+    return verifyUpdateManifest(manifest, signature, publicKey_, version,
+                                updateArchitecture(), glibcVersion(), error);
+}
+
 void UpdateController::install(const UpdateArtifact &artifact) {
-    if (busy_ || installation_ != UpdateInstallation::AppImage ||
-        !verifiedArtifact_ || artifact.url != verifiedArtifact_->url ||
+    const bool installable =
+        installation_ == UpdateInstallation::AppImage ||
+        (installation_ == UpdateInstallation::WindowsSetup &&
+         windowsSetupScope_);
+    if (busy_ || !installable || !verifiedArtifact_ ||
+        artifact.url != verifiedArtifact_->url ||
         artifact.sha256 != verifiedArtifact_->sha256 ||
         artifact.size != verifiedArtifact_->size || !canInstall_ ||
         !canInstall_() || !isTrustedUpdateUrl(artifact.url) ||
         artifact.size <= 0 || artifact.size > kMaximumUpdateSize ||
         artifact.sha256.size() != 32) {
-        emit installed(false,
-                       QStringLiteral("No verified update is ready to install, "
-                                      "or file operations are pending."));
+        emit installed(false, QCoreApplication::translate(
+                                  "UpdateController",
+                                  "No verified update is ready to install, "
+                                  "or file operations are pending."));
         return;
     }
-    download_ = std::make_unique<QTemporaryFile>(
-        QDir::tempPath() + QStringLiteral("/openscp-update-XXXXXX"));
+    if (installation_ == UpdateInstallation::WindowsSetup) {
+        // Windows runs only a file named .exe as a program.
+        QDir().mkpath(windowsSetupDirectory());
+        download_ = std::make_unique<QTemporaryFile>(
+            windowsSetupDirectory() +
+            QStringLiteral("/openscp-setup-XXXXXX.exe"));
+    } else {
+        download_ = std::make_unique<QTemporaryFile>(
+            QDir::tempPath() + QStringLiteral("/openscp-update-XXXXXX"));
+    }
     if (!download_->open()) {
         emit installed(false, download_->errorString());
         return;
@@ -244,13 +293,15 @@ void UpdateController::install(const UpdateArtifact &artifact) {
             drain();
             QString error;
             if (*writeError || *written != artifact.size || !download_->flush())
-                error = QStringLiteral(
+                error = QCoreApplication::translate(
+                    "UpdateController",
                     "The update download is incomplete or could not be saved.");
             else if (reply->error() != QNetworkReply::NoError)
                 error = reply->errorString();
             else if (reply->attribute(QNetworkRequest::HttpStatusCodeAttribute)
                          .toInt() != 200)
-                error = QStringLiteral("Unexpected update server response.");
+                error = QCoreApplication::translate(
+                    "UpdateController", "Unexpected update server response.");
             reply_ = nullptr;
             reply->deleteLater();
             if (!error.isEmpty()) {
@@ -268,29 +319,52 @@ void UpdateController::publishDownloaded(const UpdateArtifact &artifact) {
     if (!canInstall_ || !canInstall_()) {
         busy_ = false;
         download_.reset();
-        emit installed(false,
-                       QStringLiteral("File operations are still pending."));
+        emit installed(false, QCoreApplication::translate(
+                                  "UpdateController",
+                                  "File operations are still pending."));
         return;
     }
     installing_ = true;
-    const QString original = qEnvironmentVariable("APPIMAGE");
     const QString file = download_->fileName();
+    if (installation_ == UpdateInstallation::WindowsSetup) {
+        // The check opens the setup without sharing writes, which this
+        // still open file would prevent.
+        download_->close();
+        const WindowsSetupScope scope = *windowsSetupScope_;
+        const QStringList arguments = windowsSetupArguments(
+            scope, QCoreApplication::applicationPid(),
+            QDir(windowsSetupDirectory())
+                .filePath(QStringLiteral("OpenSCP-update.log")));
+        // The destructor joins this worker before releasing the file.
+        worker_.start(QRunnable::create([this, file, artifact, arguments,
+                                         scope] {
+            QString error;
+            const bool success =
+                startWindowsSetup(file, artifact, arguments, scope, error);
+            QMetaObject::invokeMethod(
+                this, [this, success, error] { finishInstall(success, error); },
+                Qt::QueuedConnection);
+        }));
+        return;
+    }
+    const QString original = qEnvironmentVariable("APPIMAGE");
     // The destructor joins this worker before releasing the temporary file.
     worker_.start(QRunnable::create([this, original, file, artifact] {
         QString error;
         const bool success =
             installAppImageUpdate(original, file, artifact, error);
         QMetaObject::invokeMethod(
-            this,
-            [this, success, error] {
-                installing_ = false;
-                busy_ = false;
-                restartRequired_ = success;
-                verifiedArtifact_.reset();
-                download_.reset();
-                emit installed(success, error);
-            },
+            this, [this, success, error] { finishInstall(success, error); },
             Qt::QueuedConnection);
     }));
+}
+
+void UpdateController::finishInstall(bool success, const QString &error) {
+    installing_ = false;
+    busy_ = false;
+    restartRequired_ = success;
+    verifiedArtifact_.reset();
+    download_.reset();
+    emit installed(success, error);
 }
 } // namespace openscpui

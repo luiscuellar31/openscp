@@ -25,7 +25,6 @@ set(OPENSCP_CORE_SRCS
     src/common/KeyboardInteractive.cpp
     src/common/RemoteListingLimits.hpp
     src/common/RemotePath.cpp
-    src/common/SafeLocalFile.cpp
     include/openscp/SafeLocalFile.hpp
     src/common/UniqueFile.hpp
     src/libssh2/detail/Libssh2CipherPreference.hpp
@@ -34,10 +33,13 @@ set(OPENSCP_CORE_SRCS
     src/libssh2/detail/Libssh2InputSafety.hpp
     src/libssh2/detail/Libssh2TransferIntegrity.hpp
     src/libssh2/detail/Libssh2WritePacing.hpp
+    src/libssh2/detail/HostKeyBlob.hpp
     src/libssh2/detail/KnownHostsFile.cpp
     src/libssh2/detail/KnownHostsFile.hpp
     src/libssh2/detail/UniqueSftpHandle.cpp
     src/libssh2/detail/UniqueSftpHandle.hpp
+    src/libssh2/detail/PlatformSocket.hpp
+    src/libssh2/detail/PlatformSocket.cpp
     src/libssh2/detail/TcpConnect.hpp
     src/libssh2/detail/TcpConnect.cpp
     src/libssh2/Libssh2ScpClient.cpp   # SCP backend module
@@ -45,6 +47,18 @@ set(OPENSCP_CORE_SRCS
     src/libssh2/Libssh2SftpClient.cpp   # real implementation
     src/libssh2/Libssh2SftpClient.hpp
 )
+
+if (WIN32)
+    list(APPEND OPENSCP_CORE_SRCS
+        src/common/SafeLocalFile_win.cpp
+        src/common/Win32Text.cpp
+        src/common/Win32Text.hpp
+        src/libssh2/detail/SshJumpTunnel_win.cpp
+        src/libssh2/detail/SshJumpTunnel_win.hpp
+    )
+else()
+    list(APPEND OPENSCP_CORE_SRCS src/common/SafeLocalFile.cpp)
+endif()
 
 set(OPENSCP_HAS_CURL_FTP 0)
 set(OPENSCP_HAS_CURL_WEBDAV 0)
@@ -62,6 +76,12 @@ if (_openscp_need_curl)
             src/curl/CurlBackendCommon.hpp
             src/curl/CurlListingParser.hpp
         )
+        if (WIN32)
+            list(APPEND OPENSCP_CORE_SRCS
+                src/curl/WindowsServerTrust_win.cpp
+                src/curl/WindowsServerTrust_win.hpp
+            )
+        endif()
     endif()
 endif()
 
@@ -177,9 +197,14 @@ set_property(TARGET openscp_core PROPERTY OPENSCP_HAS_CURL_WEBDAV
              ${OPENSCP_HAS_CURL_WEBDAV})
 
 # libssh2 (Homebrew/pkg-config) with robust link flags on macOS/Homebrew.
+# Windows uses libssh2's own CMake package, which vcpkg installs: its
+# pkg-config file would leave out the libraries a static libssh2 needs.
 find_package(PkgConfig QUIET)
-if (PkgConfig_FOUND)
+if (PkgConfig_FOUND AND NOT WIN32)
     pkg_check_modules(LIBSSH2 QUIET IMPORTED_TARGET libssh2)
+endif()
+if (WIN32)
+    find_package(libssh2 CONFIG REQUIRED)
 endif()
 
 # OpenSSL (for HMAC/RAND used in hashed known_hosts fallback)
@@ -205,7 +230,9 @@ if (OPENSCP_HAS_CURL_WEBDAV)
                                                ${OPENSCP_TINYXML2_TARGET})
 endif()
 
-if (TARGET PkgConfig::LIBSSH2)
+if (TARGET libssh2::libssh2)
+    target_link_libraries(openscp_core PRIVATE libssh2::libssh2)
+elseif (TARGET PkgConfig::LIBSSH2)
     # Preferred path: preserve all pkg-config link/search flags (e.g. Homebrew -L paths).
     target_link_libraries(openscp_core PRIVATE PkgConfig::LIBSSH2)
 elseif (LIBSSH2_FOUND)
@@ -230,4 +257,11 @@ else()
             "libssh2 was not found. Install its development package "
             "(for example, 'brew install libssh2').")
     endif()
+endif()
+
+if (WIN32)
+    # Winsock for the SSH backends' own sockets, the NT API through which
+    # SafeLocalFile opens each path component relative to its parent, and the
+    # certificate chain API that checks the libcurl backends' TLS servers.
+    target_link_libraries(openscp_core PRIVATE ws2_32 ntdll crypt32)
 endif()

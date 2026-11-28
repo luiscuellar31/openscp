@@ -1,6 +1,7 @@
 # Updating OpenSCP
 
-Use **OpenSCP → Check for updates…** to check for a newer stable release.
+Use **OpenSCP → Check for updates…** (**Help → Check for updates…** on Windows)
+to check for a newer stable release.
 **Automatically check for updates** enables a daily check and is off by default.
 Checks use HTTPS and do not send saved-site information or credentials.
 Installing an update requires your confirmation and waits for pending file
@@ -12,6 +13,8 @@ operations to finish.
 | --- | --- |
 | macOS app | Builds with in-app updates offer installation and relaunch. Otherwise, download the newer app from the releases page. Run the app from Applications, not from the DMG. |
 | Linux AppImage | Builds with in-app updates verify the download and replace the image after confirmation. Keep the AppImage in a folder owned by you where you can write. Restart OpenSCP after installation. |
+| Windows setup (`.exe`) | Builds with in-app updates verify the new setup and run it after confirmation. OpenSCP closes while it installs and opens again when it is done. An installation for all users asks for administrator approval, and OpenSCP does not open again by itself after it, since it would run with administrator rights. |
+| Windows MSI | Install the newer MSI from the releases page, or through the tool that deployed it. |
 | Flatpak from a repository | Use your software manager or `flatpak update io.github.luiscuellar31.openscp`. |
 | Standalone Flatpak bundle | Download and install the newer bundle if no update repository is configured. |
 | Snap from Snap Store | snapd updates it automatically; `sudo snap refresh openscp` requests an update. |

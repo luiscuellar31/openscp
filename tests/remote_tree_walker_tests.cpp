@@ -320,7 +320,7 @@ OPENSCP_TEST(testLostExtraConnectionRequeuesDirectory, test) {
 
 } // namespace
 
-int main() {
+int main(int argc, char **argv) {
     openscp::test::TestHarness harness("remote tree walker");
-    return harness.run();
+    return harness.run(argc, argv);
 }

@@ -66,6 +66,12 @@ The normal development entrypoints are:
 ./scripts/macos.sh dev
 ```
 
+On Windows, from PowerShell:
+
+```powershell
+.\scripts\windows.ps1 dev
+```
+
 Run the local CI baseline before opening a pull request:
 
 ```bash
@@ -77,7 +83,20 @@ git diff --check
 
 `check_ci_local.sh` configures, builds, and runs the tests in the ignored
 `build-ci-local/` directory by default. Its `--build-dir` option changes that
-path.
+path. On Windows, where these scripts need a POSIX shell, the counterpart of the
+first one is `.\scripts\windows.ps1 test` with `OPENSCP_WERROR=ON`, which the
+Windows CI job runs. Changes to PowerShell scripts also need
+`.\scripts\checks\powershell-quality.ps1`, and changes to Windows code
+`scripts/ci/windows_clang_tidy.sh` from Git Bash, which runs the clang-tidy
+checks on the files with Windows code.
+
+Each test program prints a failure with the name of its case. Name one or
+more cases to run only those, or pass `--list` to print every name:
+
+```bash
+build-ci-local/tests/openscp_transfer_manager_tests --list
+build-ci-local/tests/openscp_transfer_manager_tests testMixedTaskBatchEnqueue
+```
 
 For documentation-only changes, check the links and run `git diff --check`;
 compiling the application is not needed to validate Markdown.
@@ -151,12 +170,18 @@ the keyboard and screen-reader matrix in
   direction is described in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 - Do not call remote clients, presentation callbacks, or emit Qt signals while
   holding queue/state mutexes.
+- Change the state that a condition-variable wait checks, including a
+  `std::jthread` stop request, while holding that wait's mutex; otherwise the
+  wake-up can arrive before the wait and be lost.
 - Changes to persisted formats require explicit decisions about schema and
   versioning, together with tests for the resulting behavior.
 - Never persist passwords, passphrases, or proxy credentials in plain settings
   or transfer-queue data.
 - Add tests for success, failure, cancellation, malformed input, and concurrent
   behavior when those paths are relevant.
+- In tests, wait for what another thread produces with `waitUntil` or
+  `spinUntil` and a bounded timeout; do not check it right after the call that
+  starts it, and do not use a fixed sleep to wait for another thread.
 - Tests should link the production target that owns the behavior; do not compile
   private copies of production `.cpp` files.
 
@@ -167,7 +192,10 @@ suppression needs a documented compatibility reason or false positive.
 
 English strings live in the C++ sources. Spanish, Portuguese, French, and German
 Qt Linguist catalogs under `translations/` are tracked; generated `.qm` files
-are not.
+are not. A message with a count passes the count to `tr()` and writes `%n`, or
+`%Ln` for a number in the reader's format, so that each language picks its
+form, as in `tr("Queued: %n downloads", nullptr, count)`. English then needs
+its own catalog, `openscp_en.ts`, which holds only those messages.
 
 Use `lupdate` and `lrelease` from the same Qt 6 installation used for the build:
 
@@ -192,6 +220,15 @@ repository root:
   translations/openscp_es.ts \
   translations/openscp_fr.ts \
   translations/openscp_pt.ts
+"$QT_TOOLS_DIR/lupdate" \
+  -recursive \
+  -extensions cpp,hpp \
+  -locations absolute \
+  -source-language en \
+  -target-language en \
+  -pluralonly \
+  ui \
+  -ts translations/openscp_en.ts
 ```
 
 Review the diff in context. Preserve `%1`, `%2`, `%n`, newlines, rich-text tags,
@@ -203,7 +240,7 @@ rg -n 'type="unfinished"' translations
 rg -n 'type="(vanished|obsolete)"' translations
 
 mkdir -p build/translations-check
-for locale in de es fr pt; do
+for locale in de en es fr pt; do
   "$QT_TOOLS_DIR/lrelease" -nounfinished \
     "translations/openscp_${locale}.ts" \
     -qm "build/translations-check/openscp_${locale}.qm"
@@ -222,7 +259,10 @@ is unavailable. CI invokes them directly so missing infrastructure is an error.
 For an existing SFTP server, set `OPENSCP_IT_SFTP_HOST`,
 `OPENSCP_IT_SFTP_PORT`, `OPENSCP_IT_SFTP_USER`, the remote base, and either a
 password or private key before running CTest. See each integration test source
-for the full list of variables it accepts.
+for the full list of variables it accepts. A check that the server cannot run,
+as one that needs an RSA host key, is reported as skipped;
+`OPENSCP_IT_REQUIRE_ALL_CHECKS=1`, which the CI sets, makes it fail the run
+instead.
 
 For code and release pull requests, both commands in the
 [pull request template](.github/pull_request_template.md) must pass. The local
@@ -260,15 +300,47 @@ change is needed, what changed, and which checks you actually ran.
 - List the relevant local checks and platform builds actually run, and explain
   any relevant checks not run.
 
+## Dependency updates
+
+Dependabot proposes updates of the GitHub Actions and of vcpkg's
+`builtin-baseline`, which pins the Windows libraries. Release builds pin the
+rest by hand: OpenSSL, libssh2, and tinyxml2 in
+`scripts/ci/build_macos_release_deps.sh` for macOS, and OpenSSL in the vcpkg
+overlay port `vcpkg-ports/openssl` for Windows. When a new baseline changes
+vcpkg's own OpenSSL port, the Windows CI job warns, and
+`vcpkg-ports/README.md` explains how to copy the port again.
+
+Every Monday the **Pinned Dependency Updates** workflow runs
+`scripts/release/update-pinned-deps.py`, which looks for the newest release
+within OpenSSL's 3.5 long-term support series and within libssh2's and
+tinyxml2's major versions, and checks its sources. When the dependencies then
+build on macOS and Windows as release builds do, the workflow opens a pull
+request against `dev` and assigns it to the repository owner, so GitHub emails
+them. A newer series or major version is mentioned there but never taken. When
+a build fails, GitHub instead emails the failed run to whoever last changed the
+workflow's schedule.
+
+The workflow needs **Allow GitHub Actions to create and approve pull requests**
+in the repository's Actions settings. GitHub starts no workflows for pull
+requests that GitHub Actions opens, so close and reopen such a pull request to
+run CI on it.
+
 ## Releases
 
-After merging to `main`, wait for the Linux and macOS build jobs in the
-**Release Artifacts** workflow to pass for that commit before creating a `v*`
-tag. The `main` run uploads workflow artifacts but skips the publication job.
+After merging to `main`, wait for the Linux, macOS and Windows build jobs in
+the **Release Artifacts** workflow to pass for that commit before creating a
+`v*` tag. The `main` run uploads workflow artifacts but skips the publication job.
 Pushing the tag runs the same builds again and uploads their assets to a draft
 release only if every build passes. The draft's notes come from
 `scripts/release/release-notes.sh`; write the release name and a short
 introduction at the top before publishing it.
+
+The tag's run also keeps a `winget-manifests` artifact, which
+`scripts/release/winget-manifests.py` writes. Once the release is published,
+submit its version folder to
+[microsoft/winget-pkgs](https://github.com/microsoft/winget-pkgs) as
+`manifests/l/luiscuellar31/OpenSCP/<version>`, for instance with
+`wingetcreate submit`; the first submission creates the package.
 
 ## Licensing
 

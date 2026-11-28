@@ -82,7 +82,8 @@ A backend is responsible for validating remote paths, reporting the operations
 it supports, protecting secrets with `SecureString`, and making cancellation
 unblock network waits promptly. The libcurl backends share their connection,
 proxy, TLS, and transfer plumbing; each protocol file keeps only its own request
-and response rules.
+and response rules. The site's proxy setting alone decides how they connect:
+the proxy variables of the environment, `NO_PROXY` included, never apply.
 
 The WebDAV listing parser checks XML resource budgets before building
 TinyXML2 documents. An allocation-free linear scan bounds payload bytes,
@@ -110,12 +111,31 @@ is repeated once with that collection URL.
 The transfer queue treats NotFound from a delete as done, so a backend must
 report a missing path as NotFound. FTP answers 550 both for a missing path and
 for refused access, so after a failed DELE, RMD or RNFR the FTP backend looks
-the path up before reporting PermissionDenied.
+the path up before reporting PermissionDenied. When a server refuses RNTO over
+an existing file, as IIS does by default, the FTP backend moves that file aside
+under a free name and renames again, then deletes it, or moves it back if the
+rename still fails; publishing an upload and a rename that replaces a file
+both do this. Once the file is aside, those steps do not stop for a pause or a
+cancel, which would leave nothing at the destination. SFTP does the same when
+its server lacks posix-rename: there `interrupt()` would shut the connection
+down, so while the file is aside it only notes the interrupt and shuts down
+once the replacement ends.
 
 SFTP and SCP uploads give the remote file the local file's permission bits,
 as OpenSSH's sftp and scp do. SFTP writes the `.part` with mode 0600 and
 applies those bits just before the rename; FTP and WebDAV leave permissions to
 the server.
+
+`partialPathFor` names the `.part` for every protocol and for the queue's
+reservations and cleanup. A name with no room for the suffix within 255 bytes
+keeps its first bytes and a hash of the whole name instead, the same each
+time, so a resume finds it.
+
+Downloads write their local `.part` with mode 0600 too. Just before the
+rename, `applyDownloadPermissions` gives it the mode of the file it replaces
+or, for a new file, the remote mode from SFTP or SCP (0666 for FTP and WebDAV)
+less the umask and writable by its owner, as OpenSSH's sftp does. Windows has
+no permission bits.
 
 `SessionController` owns the active connection. `RemoteOperationController`
 runs control-connection jobs one at a time and returns completed results.
@@ -125,7 +145,19 @@ They count newly canceled jobs once; generation-specific cancellation leaves
 other generations untouched. Interrupting can drop the control connection, as
 SFTP does, so work that is only replaced (a newer listing, a search at its
 match limit, a sync scan over its size limit) cancels without interrupting
-and lets the active call finish.
+and lets the active call finish. The FTP and WebDAV backends keep an
+interrupt until `clearInterrupt()`, which the controller and each transfer
+worker call before starting work, so an interrupt that arrives between two of
+a job's calls still stops the next one. The main window does not replace a
+listing with a refresh of the same folder: the refresh runs once after it, and
+the view stays usable meanwhile, so uploads that keep finishing cannot keep
+every listing from showing. Uploads update the visible folder a second after
+they stop finishing: one into the folder updates its row from a `stat`, and
+one into a folder it lists changes nothing it shows. The folder is listed
+again when an upload adds a folder to it, when more than 16 uploads finished
+in it together, or when one row cannot show the change: the upload's `.part`
+was listed, it replaced an entry spelled with other case, or the `stat` has
+no permissions, as with FTP servers without MLST.
 `RemoteTreeWalker` and `LocalTreeDiscovery` scan directories outside the UI
 thread and can be canceled. Deleting a remote folder removes the links inside
 it as entries and never follows them.
@@ -148,11 +180,19 @@ Each initial connection has a runtime-only stop token owned by
 `SessionController`. `ClientFactory` interrupts the pending client when it is
 stopped and unregisters that callback before releasing the client. SSH also
 registers interruption for direct backend connections, publishes its socket
-under the state mutex before proxy negotiation, and uses nonblocking TCP
-connects with a shared 20-second deadline across resolved addresses. The
-platform's synchronous DNS resolver remains outside that TCP deadline.
-libssh2's blocking handshake/authentication timeout is set explicitly. That
-20-second timeout also covers each blocking SFTP write, so an upload passes
+under the state mutex before proxy negotiation, and connects over TCP as
+Happy Eyeballs (RFC 8305) does: `connectToFirstEndpoint` starts the next
+resolved address when an attempt has not connected after 250 ms or fails,
+alternating families, keeps the earlier attempts going, and gives all of them
+a shared 20-second deadline. The platform's synchronous DNS resolver remains
+outside that TCP deadline. Its HTTP CONNECT sends the proxy credentials only
+after a 407 that offers Basic, over a new connection to the proxy, and names
+the other schemes a proxy asks for, which it does not support.
+Every libssh2 call on an SSH session blocks for at most 20 seconds: libssh2
+puts the socket in non-blocking mode and waits in `poll()`, so no call returns
+`LIBSSH2_ERROR_EAGAIN` and socket timeouts do nothing, and `interrupt()` ends a
+call early by shutting the socket down. That timeout also covers each blocking
+SFTP write, so an upload passes
 about two seconds of data per write at the rate it has reached, from 32 KiB up
 to its 2 MiB buffer.
 SSH interruption and the initial disconnect shutdown hold the state mutex
@@ -161,6 +201,46 @@ and reusing the descriptor. Disconnect releases that mutex before waiting for
 the I/O mutex, so shutdown can unblock an active operation without reversing
 the I/O-to-state lock order. Session and socket ownership are then detached
 under both locks; only the caller that detaches them performs cleanup.
+On Windows the socket calls go through `PlatformSocket`, over Winsock. Shutting
+a Windows socket down does not wake a thread blocked in `select()` or `recv()`
+on it, so interruption also cancels the socket's pending I/O with `CancelIoEx`,
+and disconnect repeats that until the I/O mutex is free.
+
+An SSH jump host runs `ssh -W host:port` with the arguments that
+`ssh_jump_command()` builds for both platforms. On POSIX, ssh gets one end of a
+`socketpair()` as its standard input and output and libssh2 the other. Its
+descriptors are close-on-exec from the start, atomically on Linux, and ssh
+keeps no descriptor but its standard streams, so tunnels that start at once
+never hold each other's connections open. On
+Windows, `SshJumpTunnel` starts ssh.exe, found in an absolute folder of `PATH`
+but never through the current directory or a relative entry, or else the
+OpenSSH client that Windows installs, through
+`CreateProcessW` with only its three pipes inheritable; two threads copy between
+those pipes and one end of a checked pair of loopback sockets, whose other end
+goes to libssh2, and a third keeps the end of ssh.exe's stderr for the error
+message. Disconnect closes libssh2's socket, so ssh.exe's input ends and it
+exits, or is stopped after half a second.
+
+"Open in terminal" belongs to `TerminalCommandBuilder`, which builds the ssh
+and sftp arguments once and then quotes them for the platform: as a POSIX
+shell command for Terminal.app or a Linux terminal, and on Windows as a
+PowerShell script that a new console runs, starting each program through
+.NET's `Process.Start` with a command line quoted for the Microsoft C runtime;
+`Start-Process` would look the program up again by its ID and miss one that
+had already ended, losing its exit code. A jump
+host with its own key goes through a `ProxyCommand`, which ssh runs through a
+shell on POSIX and through `CreateProcessW` on Windows, so there it is a
+command line for the C runtime that names ssh.exe by its full path.
+
+FTPS and HTTPS WebDAV connections that verify certificates without a chosen CA
+file trust the system's roots. OpenSSL has none of its own on Windows, so
+there `WindowsServerTrust_win` replaces its check of the server's chain with
+`CertGetCertificateChain` and the SSL policy of Windows, which fetch missing
+roots and honor the Disallowed store; libcurl still checks the host name. On
+Linux, `configureTlsPolicy` hands libcurl the first system CA bundle it finds,
+because libcurl's built-in path belongs to the distribution that built it: the
+AppImage's points where Debian and Ubuntu keep nothing. A chosen CA file is the
+only one trusted on every platform.
 
 FTPS and HTTPS WebDAV connections that skip certificate verification pin the
 server's TLS public key. Before the control connection, the connection worker
@@ -176,7 +256,10 @@ uses whole words and the prompt's echo flag. The SSH backend answers the account
 name and, in the first round only, the account password; every other prompt,
 one-time codes included, goes to the connection's prompt callback, which asks
 the user with the server's echo setting. Connections without that callback,
-such as transfer workers, fail on those prompts instead of guessing.
+such as transfer workers, fail on those prompts instead of guessing, and a
+prompt the user cancels fails too. Either way the connection ends before any
+answer: libssh2 would send empty ones, which servers count as failed attempts
+that can lock the account.
 
 `AuthenticationInput` opens a window-modal input dialog without a nested event loop and
 waits on shared reply state with the connection stop token. Pending and visible
@@ -192,16 +275,31 @@ establishing a session.
 
 `TransferManager` is the entry point for the transfer queue. It coordinates
 worker connections, task state, retries, conflicts, path reservations,
-persistence, and notifications. `enqueueTasks` adds many tasks under one lock
+persistence, and notifications. On Windows it marks each completed download
+with the Mark of the Web through `markDownloadedFile`, recording the session's
+server, from `downloadOriginUrl`, and the security zone that Internet Options
+give it. `enqueueTasks` adds many tasks under one lock
 with one `tasksAdded` signal and one worker wake-up; a request can depend on an
 earlier request of the same call. Synchronization plans, local discovery
-batches and remote prescan batches enter the queue through it. Before dispatching a download or upload, it
+batches, remote prescan batches and the remote cleanups of removed uploads
+enter the queue through it. Before dispatching a download or upload, it
 reserves both the final destination and its deterministic `.part` path under
 the queue mutex; both remain reserved through publication and are released
 together. Conflict renaming checks and reserves the same pair. Local reservation
 keys conservatively normalize Unicode and fold case on every volume, including
 for upload sources; this may serialize case-distinct local names on a
-case-sensitive volume. Remote keys retain case. Partial-file cleanup applies
+case-sensitive volume. Remote keys retain case. A download whose destination
+exists only under another spelling (`localEntryName`), as when two remote names
+that differ in case meet in one file on Windows and macOS, takes a free name
+whatever the conflict policy. A download fails instead when a folder named
+after its remote path exists only under another spelling, so that two remote
+folders that differ in case never merge into one. That includes a folder that
+was already there, which nothing tells from one another remote folder made,
+and the folder chosen to download into when it has a remote folder's name.
+On Linux `localEntryName` cannot read the stored name, so neither check sees
+volumes there that ignore case, such as exFAT or CIFS. `ConflictCoordinator` asks about one conflict of
+a batch at a time; the queue reads and sets a batch's policy under a lock that
+a prompt does not hold, so it never waits for the user. Partial-file cleanup applies
 only to uploads and downloads that have not finished their transfer. For a
 removed download it acquires the same reservations and leaves the file intact
 while another task, queued or running, can still use it. A removed upload
@@ -241,8 +339,10 @@ of the session wait for a connection until they are resumed or the session
 connects again, and the main window reports it. Disconnecting also leaves the
 session's queued and running work waiting; a new connection factory for the
 current session, which reconnecting to the same site sets without changing the
-session key, queues that work again. Switching sessions leaves paused tasks
-paused. The connection factory gets a stop token of the manager's that
+session key, queues that work again. A transfer that had written part of its
+file continues it then, as after a failed reconnection or when the user retries
+it, unless that data failed its integrity check. Switching sessions leaves
+paused tasks paused. The connection factory gets a stop token of the manager's that
 clearing or replacing the session, or shutting down, requests, so a worker
 still connecting gives up instead of making them wait. The supporting classes
 have narrower jobs:
@@ -252,7 +352,13 @@ have narrower jobs:
 - `BandwidthLimiter` applies speed limits.
 - `TransferQueuePersistence` saves unfinished tasks safely. A queue too large
   to save removes the previous file, so a stale queue is never restored, and
-  `TransferQueueWriter` reports a failed save once until a save succeeds.
+  `TransferQueueWriter` reports a failed save once until a save succeeds. The
+  manager tries a failed save again five seconds later, even when the queue
+  has not changed since, with one retry waiting at a time and twice as long
+  after each failure in a row, up to five minutes. Each save rewrites the
+  whole queue, so a queue that keeps changing is saved at least every two
+  seconds, or every millisecond per saved task in a larger queue, up to 30
+  seconds; a queue that stops changing is saved 250 ms later.
 
 The transfer queue dialog keeps a separate table model indexed by task ID.
 Contiguous removals use Qt row-removal notifications. Discontinuous removals
@@ -263,7 +369,13 @@ remapped by task ID, invalidating removed tasks while preserving surviving
 selection and current-task identity through the filter proxy. For R requested
 task IDs, N tasks and P persistent indexes, model work is expected
 O(R log R + N + P), with O(R + P) temporary storage; Qt proxy/view work is
-additional. No model reset is needed for either removal path.
+additional. No model reset is needed for either removal path. After each row
+change, the columns that fit their content measure only the rows on screen,
+and none while the dialog is hidden: closing it only hides it, and the queue
+keeps updating it. The summary, refreshed with each batch of changes, reads
+the selection again only after it changes or loses rows, and takes the
+selected tasks' state from the table model, never from the queue under its
+lock.
 
 `SafeLocalFile` in the core owns local download publication and descriptor-based
 path operations for transfer tasks. The queue uses it to create or remove local
@@ -273,11 +385,28 @@ for a reader before type validation. They check the opened descriptor's type,
 ownership, and link count, then restore blocking mode before modifying the
 file or creating its stdio stream; append and close-on-exec flags are retained.
 Upload moves also use it to capture local file identity before transfer and
-inspect the source during cleanup. Existing local sources are preserved:
-POSIX provides no atomic identity-conditional unlink. The completed upload
+inspect the source during cleanup. On POSIX, existing local sources are
+preserved: POSIX provides no atomic identity-conditional unlink. The completed upload
 retains its `DeleteSource` phase with a warning for manual removal; retrying
 after removal finishes cleanup without uploading again. The identity is
 process-local; a restored cleanup without it requires manual review.
+On Windows, `SafeLocalFile_win.cpp` opens each path component relative to its
+parent's handle with `NtCreateFile`, so a junction, symbolic link or mount
+point below a user-writable folder is refused as a POSIX symbolic link is;
+only system folders that the user cannot write may be links. It renames
+through the parent handle, deletes with POSIX semantics, and refuses names that
+Windows cannot store. Its move cleanup removes an unchanged source: it holds
+the file open, sharing only reads, while it compares the identity and deletes
+it, so no other program can change the file in between. `localNameProblem`,
+which the UI applies to each name that becomes local, such as one from a
+server, also refuses names with the form of Windows short names, such as
+`REPORT~1.TXT`, which would open another entry; whole paths, which may reach a
+folder by its short name, are not checked for them. The UI takes
+junctions, like symbolic links, as links through `isLocalLink()`, and shortcut
+files as plain files: Qt's `QFileInfo` describes the entry a shortcut leads
+to, so copies, upload discovery and synchronization ask `isLocalFolder()`,
+`isLocalFile()` and the other helpers of `LocalLinks.hpp`, and the file panels
+do not resolve shortcuts.
 `SyncCoordinator` resolves the selected local root before scanning and queuing
 paths, so a root reached through a system link keeps one physical location.
 
@@ -295,26 +424,46 @@ applies the rule from `TransferAutoClear` every minute; the transfer queue
 window only edits that rule, so the cleanup also runs while it stays closed.
 
 Dragging remote items out of the window first downloads them into a batch
-folder under the staging root. `StagingStore` names the batches, checks one
+folder under the staging root; names the local system refuses, symbolic links,
+folders past the depth limit and unreadable ones are left out, and the status
+bar says so, as after the Download button. `StagingStore` names the batches, checks one
 before it is deleted, and deletes them. Only a drop of that drag on the local
 panel deletes its batch, once its copy finishes without errors and only if
 `stagingBatchPathForCleanup()` confirms it is a batch folder in the staging
 root. Any other target, such as another application, may read the files long
 after the drop, so its batch stays; the startup cleanup removes batches older
-than the retention setting. Both deletions, and the removal of a staging root
-left empty, run outside the UI thread.
+than the retention setting. Unless the user chooses one, the staging root is
+`OpenSCP-Dragged` in the system's Downloads folder, which Linux can name in the
+user's language; there the startup cleanup also goes through
+`~/Downloads/OpenSCP-Dragged`, which releases before 1.3.0 used instead. A
+root the user chose is never removed, and in it only batches with the random
+suffix are deleted, since the user's own folders can be named by date like the
+batches of releases before that suffix. Both deletions, and the removal of a
+default staging root left empty, run outside the UI thread. The panels take only drags that carry
+local files; text, web links and files that exist only inside another
+application, such as e-mail attachments, are refused.
 
 Copies, moves and deletions between local folders run on a pool of two
 threads that `MainWindow` owns, apart from the global pool the connection and
 the disconnect cleanup use. They stop at the next entry when canceled,
-removing what they staged; closing the window while one runs asks first.
+removing what they staged; closing the window while one runs asks first. A
+copy or move that takes more than a second shows its progress, whose Cancel
+stops it the same way; a file being copied finishes first.
+Closing stops nothing before the window is sure to close: connected, it
+disconnects first, where the user may still choose to stay connected, and asks
+about the local copies once the disconnect ends. A
+drop on a local panel asks before replacing an entry, as F5 and F6 do, once
+the drop is over, since a dialog during it would hold the application the
+files come from; replacing a folder replaces it whole, which the question
+says.
 
 Synchronization has three steps:
 
 1. `SyncCoordinator` collects bounded local and remote snapshots.
 2. `SyncComparisonEngine` creates a data-only plan.
 3. The accepted actions enter `TransferManager` as one ordered batch, in one
-   `enqueueTasks` call.
+   `enqueueTasks` call, for the session that was compared: when the
+   connection closed while the dialog was open, nothing is queued.
 
 When the scans pass 100,000 items or 100 GiB of known data, the coordinator
 pauses both, the remote traversal through `RemoteOperationController::setPaused`
@@ -330,9 +479,14 @@ keeps destination-only entries under unscanned source paths, and plan creation
 checks that coverage again before accepting mirror deletions. Both scans mark
 FIFOs, sockets and devices as entries that are never copied or deleted, and the
 local scan leaves out the names that uploads refuse, as the remote scan does.
+On Windows the local scan takes each entry's type, size and modification time
+from the directory listing rather than with one more file system call per
+entry; an error while listing a folder still leaves it unscanned.
 An entry present on one side only whose name matches the other side except for
 letter case or Unicode normalization is a conflict, because many destinations
-treat both names as one entry.
+treat both names as one entry. So are source entries missing from the
+destination whose names match each other that way, which would be copied to
+one entry.
 
 ## Application updates
 
@@ -348,6 +502,19 @@ before accepting a version, architecture, size, hash and minimum glibc baseline.
 installation, preserves the previous inode, syncs staged data and atomically
 publishes the replacement. The worker belongs to `UpdateController`; destruction
 joins it before releasing its temporary download. No elevated helper is used.
+
+The same signed manifest lists the Windows setup with its minimum Windows
+build. `UpdateMetadata` treats an installation as the setup's only when the
+setup's uninstall key, in the user's or the machine's hive, names the
+executable's folder; copies and MSI installations stay manual.
+`WindowsSetupInstaller` checks the downloaded setup's size and SHA-256 through
+a handle that refuses writers, renames and deletion, and starts it before
+closing that handle: directly for a per-user installation, elevated through
+UAC for one for all users. The silent setup waits for OpenSCP's process to end,
+which `MainWindowUpdates` then closes, and starts OpenSCP again when it is
+done, for a per-user installation only: from a setup started elevated, Inno
+Setup cannot start it as the original user. The next start deletes the
+downloaded setup.
 
 `MacUpdater` is the optional Objective-C++ bridge to Sparkle. Sparkle owns signed
 feeds, archive verification, replacement and relaunch. `MainWindowUpdates`
@@ -381,6 +548,17 @@ Each kind of persisted data has one owner:
 | `NavigationStore` | Local history and session-scoped remote history and favorites. |
 | `TransferQueuePersistence` | Versioned, atomic storage for unfinished transfers. |
 
+On Windows, `main.cpp` makes INI the default settings format, so settings,
+with the secrets that DPAPI encrypts for the user, are files under
+`%APPDATA%\OpenSCP` rather than registry keys. The transfer queue lives in
+`%LOCALAPPDATA%`, which roaming profiles do not copy to other computers.
+`AppSettings` reads only the user's own file, without QSettings' fallback
+to organization-wide and machine-wide files: the machine-wide INI file
+would be under `C:\ProgramData`, which any user may write. On Linux and
+macOS it keeps each settings file private to its owner. An INI file, the
+format Linux uses, is created private before its first write; the property
+lists of macOS are written by the system.
+
 Use these classes instead of reading or writing their settings directly.
 `SettingsDialog` writes only the values the user changed, so every other
 setting keeps following its default. Saving an edited site removes the
@@ -388,6 +566,14 @@ credentials whose fields are empty, except those that could not be read when
 the editor opened.
 Changes to persisted formats require explicit decisions about schema and
 versioning, and corrupt or unsupported data must not be silently overwritten.
+
+Only one OpenSCP process uses a data folder at a time, so two processes never
+restore, run or save the same transfer queue. At startup, `SingleInstance`
+locks `instance.lock` in the application's local data folder, where the queue
+lives, and listens on a local socket that only the user can open; a later
+launch asks that process to bring its window forward and quits. A lock whose
+process has ended is taken over, and a folder that cannot hold a lock leaves
+OpenSCP unguarded.
 
 Saved sites record their format version under `Sites/formatVersion`. A
 versioned record that lacks fields takes their defaults, while incomplete
@@ -412,7 +598,8 @@ Path navigation is split by responsibility:
 - `OpenPathDialog` collects a typed path and exposes recent paths and favorites;
   it does not read settings or navigate by itself.
 - `MainWindow` selects the local or remote presentation, performs navigation,
-  and persists history and favorites through `NavigationStore`.
+  and persists history and favorites through `NavigationStore`, which reports
+  a save that fails once, until a save works again, so the window can say so.
 
 ## Adding a change
 

@@ -223,6 +223,7 @@ void RemoteActionController::remove(const QString &basePath,
         QCoreApplication::translate("MainWindow", "Deleting remote items…"),
         QCoreApplication::translate("MainWindow", "Cancel"), 0,
         static_cast<int>(entries.size()), context_.dialogParent);
+    UiAlerts::showLabelAsText(*state->progress);
     state->progress->setWindowTitle(
         QCoreApplication::translate("MainWindow", "Delete"));
     state->progress->setWindowModality(Qt::NonModal);
@@ -293,9 +294,9 @@ void RemoteActionController::remove(const QString &basePath,
             state->progress->setLabelText(
                 QCoreApplication::translate(
                     "MainWindow", "Deleting %1\nRemoved: %2  |  Failed: %3")
-                    .arg(progress.currentPath)
-                    .arg(progress.affectedEntries)
-                    .arg(progress.failedEntries));
+                    .arg(progress.currentPath,
+                         QString::number(progress.affectedEntries),
+                         QString::number(progress.failedEntries)));
         });
     connect(state->progress, &QProgressDialog::canceled, this, [this, state] {
         state->canceled = true;
@@ -373,6 +374,7 @@ void RemoteActionController::changePermissions(const QString &basePath,
                                                 "Changing remote permissions…"),
                     QCoreApplication::translate("MainWindow", "Cancel"), 0, 0,
                     context_.dialogParent);
+                UiAlerts::showLabelAsText(*progress);
                 progress->setWindowTitle(
                     QCoreApplication::translate("MainWindow", "Permissions"));
                 progress->setWindowModality(Qt::NonModal);
@@ -398,9 +400,9 @@ void RemoteActionController::changePermissions(const QString &basePath,
                             "MainWindow",
                             "Changing permissions for %1\nUpdated: %2  |  "
                             "Failed: %3")
-                            .arg(update.currentPath)
-                            .arg(update.affectedEntries)
-                            .arg(update.failedEntries));
+                            .arg(update.currentPath,
+                                 QString::number(update.affectedEntries),
+                                 QString::number(update.failedEntries)));
                 });
             *mutationConnection = connect(
                 context_.operations,

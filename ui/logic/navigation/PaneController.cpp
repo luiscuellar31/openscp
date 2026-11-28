@@ -2,6 +2,7 @@
 
 #include "logic/common/RowSelection.hpp"
 #include "logic/common/UiAlerts.hpp"
+#include "logic/common/UiFormatters.hpp"
 #include "logic/navigation/RemotePath.hpp"
 #include "logic/remote/LocalTreeDiscovery.hpp"
 #include "logic/remote/RemoteModel.hpp"
@@ -200,8 +201,8 @@ void reportResults(const PaneController::SearchContext &context,
     showSearchResults(context.dialogParent, context.panelLabel, basePath,
                       matches, scanErrors, canceled, truncated);
     QString message = QCoreApplication::translate(
-                          "MainWindow", "Found %1 recursive match(es) in %2.")
-                          .arg(matches.size())
+                          "MainWindow", "Found %n recursive matches in %1.",
+                          nullptr, pluralCount(matches.size()))
                           .arg(context.panelLabel);
     if (truncated) {
         message +=
@@ -327,9 +328,9 @@ void PaneController::search(const SearchContext &context) {
     if (!request.recursive) {
         const int matches = selectCurrentFolderMatches(context, expression);
         const QString message =
-            matches > 0 ? QCoreApplication::translate(
-                              "MainWindow", "Found %1 match(es) in %2.")
-                              .arg(matches)
+            matches > 0 ? QCoreApplication::translate("MainWindow",
+                                                      "Found %n matches in %1.",
+                                                      nullptr, matches)
                               .arg(context.panelLabel)
                         : QCoreApplication::translate("MainWindow",
                                                       "No matches found in %1.")
@@ -361,6 +362,7 @@ void PaneController::search(const SearchContext &context) {
                 .arg(context.panelLabel),
             QCoreApplication::translate("MainWindow", "Cancel"), 0, 0,
             context.dialogParent);
+        UiAlerts::showLabelAsText(*state->progress);
         state->progress->setWindowModality(Qt::NonModal);
         state->progress->setMinimumDuration(0);
         state->progress->setAutoClose(false);
@@ -400,9 +402,9 @@ void PaneController::search(const SearchContext &context) {
                     QCoreApplication::translate(
                         "MainWindow",
                         "Scanning %1\nVisited: %2  |  Matches: %3")
-                        .arg(progress.currentPath)
-                        .arg(progress.visitedEntries)
-                        .arg(state->matches.size()));
+                        .arg(progress.currentPath,
+                             QString::number(progress.visitedEntries),
+                             QString::number(state->matches.size())));
             });
         state->completionConnection = connect(
             context.remoteOperations, &RemoteOperationController::jobFinished,
@@ -479,6 +481,7 @@ void PaneController::search(const SearchContext &context) {
                                 .arg(context.panelLabel),
                             QCoreApplication::translate("MainWindow", "Cancel"),
                             0, 0, context.dialogParent);
+    UiAlerts::showLabelAsText(*state->progress);
     state->progress->setWindowModality(Qt::NonModal);
     state->progress->setMinimumDuration(0);
     state->progress->setAutoClose(false);
@@ -515,9 +518,9 @@ void PaneController::search(const SearchContext &context) {
             state->progress->setLabelText(
                 QCoreApplication::translate(
                     "MainWindow", "Scanning %1\nVisited: %2  |  Matches: %3")
-                    .arg(QDir::fromNativeSeparators(currentPath))
-                    .arg(counters.itemCount)
-                    .arg(state->matches.size()));
+                    .arg(QDir::fromNativeSeparators(currentPath),
+                         QString::number(counters.itemCount),
+                         QString::number(state->matches.size())));
         });
 
     const auto finalize = [this,

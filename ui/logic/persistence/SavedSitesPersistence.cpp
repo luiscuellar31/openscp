@@ -352,7 +352,9 @@ SavedSitesPersistence::loadSites(const LoadOptions &options) {
 
         site.opt.webdav_verify_peer =
             settings.value("webdavVerifyPeer", true).toBool();
-        site.opt.webdav_base_path = openscp::normalizeWebDavBasePath(
+        // Stored as text, so that escapes copied from a URL into a site of
+        // an earlier version are decoded too.
+        site.opt.webdav_base_path = openscp::webDavBasePathFromText(
             settings.value("webdavBasePath", QStringLiteral("/"))
                 .toString()
                 .trimmed()
@@ -469,8 +471,8 @@ SavedSitesPersistence::saveSites(const QVector<SiteEntry> &sites) {
         settings.setValue("webdavVerifyPeer", site.opt.webdav_verify_peer);
         settings.setValue(
             "webdavBasePath",
-            QString::fromStdString(
-                openscp::normalizeWebDavBasePath(site.opt.webdav_base_path)));
+            QString::fromStdString(openscp::webDavBasePathToText(
+                openscp::normalizeWebDavBasePath(site.opt.webdav_base_path))));
         settings.setValue(
             "webdavCaCertPath",
             site.opt.webdav_ca_cert_path

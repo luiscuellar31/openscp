@@ -10,6 +10,7 @@
 #include "logic/connections/SessionController.hpp"
 #include "logic/navigation/NavigationScope.hpp"
 #include "logic/navigation/PaneController.hpp"
+#include "logic/navigation/RemotePath.hpp"
 #include "logic/persistence/SecretStore.hpp"
 #include "logic/remote/RemoteActionController.hpp"
 #include "logic/remote/RemoteModel.hpp"
@@ -78,6 +79,7 @@
 #include <memory>
 #include <optional>
 #include <thread>
+#include <utility>
 
 namespace {
 
@@ -91,7 +93,8 @@ void setActionIconAndTooltip(QAction *action, const QIcon &icon) {
     if (!action)
         return;
     action->setIcon(icon);
-    action->setToolTip(action->text());
+    // iconText() leaves out the "&" that marks a menu's access key.
+    action->setToolTip(action->iconText());
 }
 
 void bindActionToPanelShortcut(QAction *action, QWidget *panel,
@@ -141,6 +144,10 @@ void configurePanelTreeView(QTreeView *view, QAbstractItemModel *model,
     view->setRootIndex(rootIndex);
     view->setSelectionMode(QAbstractItemView::ExtendedSelection);
     view->setSelectionBehavior(QAbstractItemView::SelectRows);
+    // Every row is one line. Otherwise each listing makes the view measure
+    // all of its rows, which stalls big folders where it scrolls by pixel, as
+    // on macOS.
+    view->setUniformRowHeights(true);
     view->setSortingEnabled(true);
     view->sortByColumn(0, Qt::AscendingOrder);
     view->header()->setStretchLastSection(true);
@@ -252,6 +259,22 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
                 },
                 Qt::QueuedConnection);
         });
+    // A label of its own, since the message that follows each save, as
+    // "Left: …" after a navigation, would replace a status message at once.
+    navigationStore_.setSaveFailureHandler([self](const QString &error) {
+        if (!self)
+            return;
+        auto *label = new QLabel(
+            tr("History and favorites could not be saved: %1").arg(error),
+            self->statusBar());
+        label->setTextFormat(Qt::PlainText);
+        self->statusBar()->addPermanentWidget(label, 0);
+        QTimer::singleShot(15000, label, [self, label] {
+            if (self)
+                self->statusBar()->removeWidget(label);
+            label->deleteLater();
+        });
+    });
     sessionController_ = new openscpui::SessionController(this);
     paneController_ = new openscpui::PaneController(this);
     const QString home = preferredLocalHomePath();
@@ -272,6 +295,10 @@ void MainWindow::initializePanels(const QString &home) {
                           QDir::AllDirs);
     rightLocalModel_->setFilter(QDir::AllEntries | QDir::NoDotAndDotDot |
                                 QDir::AllDirs);
+    // On Windows a shortcut would otherwise show the name of the entry it
+    // leads to, and one to a folder would be dragged as that folder.
+    leftModel_->setResolveSymlinks(false);
+    rightLocalModel_->setResolveSymlinks(false);
 
     // Initial paths: local home (fallback to root if HOME is unavailable)
     leftModel_->setRootPath(home);
@@ -373,7 +400,7 @@ void MainWindow::initializePanels(const QString &home) {
     actUpLeft_ = leftPaneBar_->addAction(tr("Up"), this, &MainWindow::goUpLeft);
     setActionIconAndTooltip(actUpLeft_, resIcon("action-go-up.svg"));
     // Button "Open left folder" next to Up
-    actChooseLeft_ = leftPaneBar_->addAction(tr("Open left folder"), this,
+    actChooseLeft_ = leftPaneBar_->addAction(tr("Open &left folder"), this,
                                              &MainWindow::chooseLeftDir);
     setActionIconAndTooltip(actChooseLeft_, resIcon("action-open-folder.svg"));
     actHomeLeft_ =
@@ -458,7 +485,7 @@ void MainWindow::initializePanels(const QString &home) {
         rightPaneBar_->addAction(tr("Up"), this, &MainWindow::goUpRight);
     setActionIconAndTooltip(actUpRight_, resIcon("action-go-up.svg"));
     // Button "Open right folder" next to Up
-    actChooseRight_ = rightPaneBar_->addAction(tr("Open right folder"), this,
+    actChooseRight_ = rightPaneBar_->addAction(tr("Open &right folder"), this,
                                                &MainWindow::chooseRightDir);
     setActionIconAndTooltip(actChooseRight_, resIcon("action-open-folder.svg"));
     actHomeRight_ =
@@ -672,16 +699,18 @@ void MainWindow::initializeMainToolbar() {
     leftPaneBar_->setIconSize(QSize(subIconPx, subIconPx));
     rightPaneBar_->setIconSize(QSize(subIconPx, subIconPx));
     // Copy/move/delete actions now live in the left sub‑toolbar
-    actConnect_ =
-        mainToolbar->addAction(tr("Connect"), this, &MainWindow::connectRemote);
+    // The File menu shares these actions. Their tooltips use iconText(),
+    // which leaves out the "&" of the menu's access key.
+    actConnect_ = mainToolbar->addAction(tr("&Connect"), this,
+                                         &MainWindow::connectRemote);
     actConnect_->setObjectName(QStringLiteral("connectAction"));
     actConnect_->setIcon(mainWindowActionIcon("action-connect.svg"));
-    actConnect_->setToolTip(actConnect_->text());
+    actConnect_->setToolTip(actConnect_->iconText());
     mainToolbar->addSeparator();
-    actDisconnect_ = mainToolbar->addAction(tr("Disconnect"), this,
+    actDisconnect_ = mainToolbar->addAction(tr("&Disconnect"), this,
                                             &MainWindow::disconnectRemote);
     actDisconnect_->setIcon(mainWindowActionIcon("action-disconnect.svg"));
-    actDisconnect_->setToolTip(actDisconnect_->text());
+    actDisconnect_->setToolTip(actDisconnect_->iconText());
     actDisconnect_->setEnabled(false);
 
     auto setTextBesideIcon = [mainToolbar](QAction *action,
@@ -699,7 +728,7 @@ void MainWindow::initializeMainToolbar() {
     setTextBesideIcon(actConnect_, tr("Connect"));
     setTextBesideIcon(actDisconnect_, tr("Disconnect"));
     mainToolbar->addSeparator();
-    actSites_ = mainToolbar->addAction(tr("Saved sites"), [this] {
+    actSites_ = mainToolbar->addAction(tr("Sa&ved sites"), [this] {
         // Raise the open Site Manager: the main window refreshes only that one.
         if (siteManager_) {
             siteManager_->show();
@@ -722,31 +751,31 @@ void MainWindow::initializeMainToolbar() {
             restoreFocusAfterDialog(previousFocus);
     });
     actSites_->setIcon(mainWindowActionIcon("action-open-saved-sites.svg"));
-    actSites_->setToolTip(actSites_->text());
+    actSites_->setToolTip(actSites_->iconText());
     mainToolbar->addSeparator();
-    actShowQueue_ = mainToolbar->addAction(tr("Transfers"),
+    actShowQueue_ = mainToolbar->addAction(tr("&Transfers"),
                                            [this] { showTransferQueue(); });
     actShowQueue_->setIcon(
         mainWindowActionIcon("action-open-transfer-queue.svg"));
-    actShowQueue_->setToolTip(actShowQueue_->text());
+    actShowQueue_->setToolTip(actShowQueue_->iconText());
     mainToolbar->addSeparator();
     actSync_ =
-        mainToolbar->addAction(tr("Sync"), this, &MainWindow::showSyncDialog);
+        mainToolbar->addAction(tr("S&ync"), this, &MainWindow::showSyncDialog);
     actSync_->setIcon(mainWindowActionIcon("action-refresh.svg"));
     actSync_->setToolTip(tr("Compare and synchronize the current folders"));
     actSync_->setEnabled(false);
     mainToolbar->addSeparator();
-    actShowHistory_ = mainToolbar->addAction(tr("History"), this,
+    actShowHistory_ = mainToolbar->addAction(tr("&History"), this,
                                              &MainWindow::showHistoryMenu);
     actShowHistory_->setIcon(mainWindowActionIcon("action-open-history.svg"));
-    actShowHistory_->setToolTip(actShowHistory_->text());
+    actShowHistory_->setToolTip(actShowHistory_->iconText());
     mainToolbar->addSeparator();
     actShowFavorites_ = mainToolbar->addAction(
-        tr("Favorites"), this, &MainWindow::showFavoritesDialog);
+        tr("&Favorites"), this, &MainWindow::showFavoritesDialog);
     actShowFavorites_->setObjectName(QStringLiteral("showFavoritesAction"));
     actShowFavorites_->setIcon(
         mainWindowActionIcon("action-open-favorites.svg"));
-    actShowFavorites_->setToolTip(actShowFavorites_->text());
+    actShowFavorites_->setToolTip(actShowFavorites_->iconText());
 
     // Show text beside icon for Sites and Queue too
     setTextBesideIcon(actSites_, tr("Saved sites"));
@@ -839,23 +868,37 @@ bool MainWindow::focusNextPrevChild(bool next) {
 void MainWindow::initializeMenuBarActions() {
     // Menu bar (native on macOS)
     // Duplicate actions so users who prefer the classic menu can use it.
-    appMenu_ = menuBar()->addMenu(tr("OpenSCP"));
-    actAbout_ = appMenu_->addAction(tr("About OpenSCP"), this,
+    // Windows and Linux open a menu, or choose one of its items, with Alt and
+    // the letter after "&"; macOS menus leave the "&" out.
+    appMenu_ = menuBar()->addMenu(tr("&OpenSCP"));
+    actAbout_ = appMenu_->addAction(tr("&About OpenSCP"), this,
                                     &MainWindow::showAboutDialog);
     actAbout_->setMenuRole(QAction::AboutRole);
-    actPrefs_ = appMenu_->addAction(tr("Settings…"), this,
+    actPrefs_ = appMenu_->addAction(tr("&Settings…"), this,
                                     &MainWindow::showSettingsDialog);
     actPrefs_->setMenuRole(QAction::PreferencesRole);
-    // Standard cross‑platform shortcut (Cmd+, on macOS; Ctrl+, on
-    // Linux/Windows)
-    actPrefs_->setShortcut(QKeySequence::Preferences);
+    // The platform's standard shortcuts, such as Cmd+, and Cmd+Q on macOS.
+    // Qt has none for these on Windows, nor for settings under GNOME; there
+    // they get Ctrl+, and Ctrl+Q.
+    const auto standardShortcutsOr = [](QKeySequence::StandardKey key,
+                                        const QString &fallback) {
+        const QList<QKeySequence> standard = QKeySequence::keyBindings(key);
+        return standard.isEmpty()
+                   ? QList<QKeySequence>{QKeySequence::fromString(
+                         fallback, QKeySequence::PortableText)}
+                   : standard;
+    };
+    actPrefs_->setObjectName(QStringLiteral("settingsAction"));
+    actPrefs_->setShortcuts(standardShortcutsOr(QKeySequence::Preferences,
+                                                QStringLiteral("Ctrl+,")));
     appMenu_->addSeparator();
-    actQuit_ = appMenu_->addAction(tr("Quit"), this, &QWidget::close);
+    actQuit_ = appMenu_->addAction(tr("&Quit"), this, &QWidget::close);
+    actQuit_->setObjectName(QStringLiteral("quitAction"));
     actQuit_->setMenuRole(QAction::QuitRole);
-    // Standard quit shortcut (Cmd+Q / Ctrl+Q)
-    actQuit_->setShortcut(QKeySequence::Quit);
+    actQuit_->setShortcuts(
+        standardShortcutsOr(QKeySequence::Quit, QStringLiteral("Ctrl+Q")));
 
-    fileMenu_ = menuBar()->addMenu(tr("File"));
+    fileMenu_ = menuBar()->addMenu(tr("&File"));
     fileMenu_->addAction(actChooseLeft_);
     fileMenu_->addAction(actChooseRight_);
     fileMenu_->addSeparator();
@@ -867,8 +910,8 @@ void MainWindow::initializeMenuBarActions() {
     fileMenu_->addAction(actShowHistory_);
     fileMenu_->addAction(actShowFavorites_);
     // On non‑macOS platforms, also show Preferences and Quit under "File"
-    // to provide a familiar UX on Linux/Windows while keeping the "OpenSCP" app
-    // menu.
+    // to provide a familiar UX on Linux/Windows; Linux keeps the "OpenSCP" app
+    // menu as well.
 #ifndef Q_OS_MAC
     fileMenu_->addSeparator();
     fileMenu_->addAction(actPrefs_);
@@ -876,38 +919,45 @@ void MainWindow::initializeMenuBarActions() {
 #endif
 
     // Help (avoid native help menu to skip the search box)
-    auto *helpMenu = menuBar()->addMenu(tr("Help"));
+    helpMenu_ = menuBar()->addMenu(tr("&Help"));
     // On macOS, a menu titled exactly "Help" triggers the native search bar.
     // Keep visible label "Help" but avoid detection by inserting a zero‑width
     // space.
 #ifdef Q_OS_MAC
     {
-        const QString helpMenuTitle = helpMenu->title();
+        const QString helpMenuTitle =
+            helpMenu_->title().remove(QLatin1Char('&'));
         if (helpMenuTitle.compare(QStringLiteral("Help"),
                                   Qt::CaseInsensitive) == 0) {
-            helpMenu->setTitle(QStringLiteral("Hel") + QChar(0x200B) +
-                               QStringLiteral("p"));
+            helpMenu_->setTitle(QStringLiteral("Hel") + QChar(0x200B) +
+                                QStringLiteral("p"));
         }
     }
 #endif
-    helpMenu->menuAction()->setMenuRole(QAction::NoRole);
+    helpMenu_->menuAction()->setMenuRole(QAction::NoRole);
     // Prevent macOS from moving actions to the app menu: force NoRole
     {
-        QAction *helpAboutAct = new QAction(tr("About OpenSCP"), this);
+        QAction *helpAboutAct = new QAction(tr("&About OpenSCP"), this);
         helpAboutAct->setMenuRole(QAction::NoRole);
         connect(helpAboutAct, &QAction::triggered, this,
                 &MainWindow::showAboutDialog);
-        helpMenu->addAction(helpAboutAct);
+        helpMenu_->addAction(helpAboutAct);
     }
     {
-        QAction *reportAct = new QAction(tr("Report a bug"), this);
+        QAction *reportAct = new QAction(tr("&Report a bug"), this);
         reportAct->setMenuRole(QAction::NoRole);
         connect(reportAct, &QAction::triggered, this, [] {
             QDesktopServices::openUrl(
                 QUrl("https://github.com/luiscuellar31/openscp/issues"));
         });
-        helpMenu->addAction(reportAct);
+        helpMenu_->addAction(reportAct);
     }
+#ifdef Q_OS_WIN
+    // Windows programs have no menu named after themselves: Settings and Quit
+    // are under File, About under Help, and initializeUpdates() puts the
+    // update actions there too.
+    appMenu_->menuAction()->setVisible(false);
+#endif
 }
 
 void MainWindow::initializePanelInteractions() {
@@ -1037,6 +1087,40 @@ void MainWindow::initializeRuntimeState() {
         return selection;
     };
     remoteActionController_->setContext(std::move(remoteActionContext));
+    connect(remoteOps_, &RemoteOperationController::statCompleted, this,
+            [this](const RemoteOperationController::StatResult &result) {
+                if (!uploadStatJobs_.remove(result.result.job.id) ||
+                    !rightIsRemote_ || !rightRemoteModel_ ||
+                    rightRemoteModel_->isLoading()) {
+                    return;
+                }
+                const QString root = rightRemoteModel_->rootPath();
+                const QString name = result.path.section(QLatin1Char('/'), -1);
+                // The controller runs one job at a time, so a listing that
+                // is still to come started after the upload and shows it.
+                if (joinRemotePath(root, name) != result.path ||
+                    activeRemoteListJob_ != 0) {
+                    return;
+                }
+                // A listing replaces what one row cannot: the upload's
+                // partial file if it was listed, an entry it replaced under
+                // another case on a server that ignores case, and the
+                // permissions an FTP server without MLST leaves out of a stat.
+                const QString partialName =
+                    partialPathFor(result.path).section(QLatin1Char('/'), -1);
+                if (result.result.outcome !=
+                        RemoteOperationController::Outcome::Succeeded ||
+                    !result.found || (result.info.mode & 07777u) == 0 ||
+                    rightRemoteModel_->hasEntry(partialName) ||
+                    (!rightRemoteModel_->hasEntry(name) &&
+                     rightRemoteModel_->hasEntry(name, Qt::CaseInsensitive))) {
+                    requestRemoteListing(root, true);
+                    return;
+                }
+                openscp::FileInfo info = result.info;
+                info.name = name.toStdString();
+                rightRemoteModel_->upsertEntry(info);
+            });
     connect(
         remoteOps_, &RemoteOperationController::listCompleted, this,
         [this](const RemoteOperationController::ListResult &result) {
@@ -1047,6 +1131,7 @@ void MainWindow::initializeRuntimeState() {
             activeRemoteListJob_ = 0;
             if (result.result.outcome !=
                 RemoteOperationController::Outcome::Succeeded) {
+                remoteRefreshPending_ = false;
                 if (activeRemoteListIsInitial_ &&
                     !initialRemoteFallbackAttempted_ &&
                     requestedRemotePath_ != QStringLiteral("/")) {
@@ -1055,7 +1140,8 @@ void MainWindow::initializeRuntimeState() {
                     return;
                 }
                 rightRemoteModel_->clearLoading();
-                rightView_->setEnabled(true);
+                openscpui::enableRestoringFocus(
+                    rightView_, std::exchange(remoteViewHadFocus_, false));
                 statusBar()->showMessage(
                     tr("Remote folder unavailable. The session remains "
                        "connected; use Refresh to retry."),
@@ -1070,8 +1156,26 @@ void MainWindow::initializeRuntimeState() {
             entries.reserve(static_cast<std::size_t>(result.entries.size()));
             for (const auto &entry : result.entries)
                 entries.push_back(entry.info);
+            // The view stayed usable during a refresh, so keep the selection
+            // and scroll position it has now.
+            QSet<QString> selectedNames;
+            int scrollValue = 0;
+            if (activeRemoteListIsRefresh_ && rightView_->selectionModel()) {
+                const QModelIndexList selected =
+                    rightView_->selectionModel()->selectedRows(kNameColumn);
+                for (const QModelIndex &index : selected) {
+                    const QString name = rightRemoteModel_->nameAt(index);
+                    if (!name.isEmpty())
+                        selectedNames.insert(name);
+                }
+                if (rightView_->verticalScrollBar())
+                    scrollValue = rightView_->verticalScrollBar()->value();
+            }
             rightRemoteModel_->setEntries(result.path, entries);
-            rightView_->setEnabled(true);
+            if (statusBar()->currentMessage() == remoteListingMessage_)
+                statusBar()->clearMessage();
+            openscpui::enableRestoringFocus(
+                rightView_, std::exchange(remoteViewHadFocus_, false));
             sessionHealthMonitor_.recordActivity();
 
             if (activeRemoteListIsRefresh_ && rightView_->selectionModel()) {
@@ -1081,7 +1185,7 @@ void MainWindow::initializeRuntimeState() {
                 QVector<int> restoredRows;
                 for (int row = 0; row < rightRemoteModel_->rowCount(); ++row) {
                     const QModelIndex index = rightRemoteModel_->index(row, 0);
-                    if (!remoteRefreshSelectionNames_.contains(
+                    if (!selectedNames.contains(
                             rightRemoteModel_->nameAt(index))) {
                         continue;
                     }
@@ -1100,17 +1204,17 @@ void MainWindow::initializeRuntimeState() {
                     selection->setCurrentIndex(first,
                                                QItemSelectionModel::NoUpdate);
                 if (rightView_->verticalScrollBar()) {
-                    rightView_->verticalScrollBar()->setValue(
-                        remoteRefreshScrollValue_);
+                    rightView_->verticalScrollBar()->setValue(scrollValue);
                 }
             } else if (rightView_->selectionModel()) {
                 rightView_->selectionModel()->clear();
                 if (rightView_->verticalScrollBar())
                     rightView_->verticalScrollBar()->setValue(0);
             }
-            remoteRefreshSelectionNames_.clear();
             activeRemoteListIsRefresh_ = false;
             activeRemoteListIsInitial_ = false;
+            if (std::exchange(remoteRefreshPending_, false))
+                requestRemoteListing(requestedRemotePath_, true);
         });
     connect(remoteOps_, &RemoteOperationController::healthCheckCompleted, this,
             [this](const RemoteOperationController::HealthResult &result) {
@@ -1155,14 +1259,29 @@ void MainWindow::initializeRuntimeState() {
     // A single cold snapshot seeds the delta-based UI observer at startup.
     transferUiController_.initialize(transferMgr_->tasksSnapshot());
     // Uploads in a batch finish close together, so the visible folder is
-    // refreshed once they stop finishing rather than after each one.
+    // updated once they stop finishing rather than after each one.
     uploadRefreshTimer_ = new QTimer(this);
     uploadRefreshTimer_->setSingleShot(true);
     uploadRefreshTimer_->setInterval(1000);
     connect(uploadRefreshTimer_, &QTimer::timeout, this, [this] {
-        if (!rightIsRemote_ || !rightRemoteModel_)
+        const QSet<QString> uploaded = std::exchange(uploadedRemoteRows_, {});
+        const bool needsListing =
+            std::exchange(uploadRefreshNeedsListing_, false);
+        if (!rightIsRemote_ || !rightRemoteModel_ || !remoteOps_)
             return;
-        requestRemoteListing(rightRemoteModel_->rootPath(), true);
+        // Looking up a few files costs less than listing a large folder
+        // again; many files cost more.
+        constexpr qsizetype kMostRowsToLookUp = 16;
+        if (needsListing || uploaded.size() > kMostRowsToLookUp) {
+            requestRemoteListing(rightRemoteModel_->rootPath(), true);
+            return;
+        }
+        for (const QString &path : uploaded) {
+            RemoteOperationController::StatRequest request;
+            request.path = path;
+            if (const auto job = remoteOps_->submit(request))
+                uploadStatJobs_.insert(job);
+        }
     });
     connect(transferMgr_, &TransferManager::tasksAdded, this,
             [this](const QVector<quint64> &ids) {
@@ -1196,7 +1315,8 @@ void MainWindow::initializeRuntimeState() {
                 .toBool();
         if (!autoClean)
             return;
-        const QString root = openscpui::effectiveStagingRootPath(settings);
+        const QStringList roots =
+            openscpui::stagingRootsForStartupCleanup(settings);
         const int retentionDays = qBound(
             1,
             settings.value(openscpui::settingskeys::kStagingRetentionDays, 7)
@@ -1205,8 +1325,9 @@ void MainWindow::initializeRuntimeState() {
         const QDateTime cutoff =
             QDateTime::currentDateTimeUtc().addDays(-retentionDays);
         // Batches can hold whole downloads, so they go away off the UI thread.
-        QThreadPool::globalInstance()->start([root, cutoff] {
-            (void)openscpui::removeStagingBatchesOlderThan(root, cutoff);
+        QThreadPool::globalInstance()->start([roots, cutoff] {
+            for (const QString &root : roots)
+                (void)openscpui::removeStagingBatchesOlderThan(root, cutoff);
         });
     });
 
@@ -1422,8 +1543,26 @@ void MainWindow::closeEvent(QCloseEvent *e) {
         e->ignore();
         return;
     }
-    if (updates_)
-        updates_->cancel();
+    // Nothing is stopped before the window is sure to close: the user may
+    // still stay connected, or let the local copies finish. A disconnect
+    // closes the window when it ends, which asks about the local copies then.
+    if (transferCleanupInProgress_) {
+        pendingCloseAfterDisconnect_ = true;
+        e->ignore();
+        return;
+    }
+    if (sessionController_->isDisconnecting()) {
+        pendingCloseAfterDisconnect_ = true;
+        e->ignore();
+        return;
+    }
+    if (rightIsRemote_) {
+        pendingCloseAfterDisconnect_ = true;
+        if (!disconnectRemote())
+            pendingCloseAfterDisconnect_ = false;
+        e->ignore();
+        return;
+    }
     if (localFsJobsInFlight_.load() > 0) {
         if (UiAlerts::question(
                 this, tr("Local copies running"),
@@ -1437,25 +1576,11 @@ void MainWindow::closeEvent(QCloseEvent *e) {
         localFsCanceled_->store(true);
         localFsPool_.waitForDone();
     }
-    if (transferCleanupInProgress_) {
-        pendingCloseAfterDisconnect_ = true;
-        e->ignore();
-        return;
-    }
-    if (sessionController_->isDisconnecting()) {
-        pendingCloseAfterDisconnect_ = true;
-        e->ignore();
-        return;
-    }
     if (sessionController_->isConnecting()) {
         sessionController_->requestConnectionCancellation();
     }
-    if (rightIsRemote_) {
-        pendingCloseAfterDisconnect_ = true;
-        disconnectRemote();
-        e->ignore();
-        return;
-    }
+    if (updates_)
+        updates_->cancel();
     saveMainWindowUiState();
     QMainWindow::closeEvent(e);
 }
@@ -1623,14 +1748,24 @@ void MainWindow::handleTransferUiUpdate(const QVector<quint64> &upsertIds,
     const QVector<TransferTask> upserts =
         transferMgr_->tasksSnapshot(upsertIds);
     const openscpui::TransferUiUpdate update = transferUiController_.observe(
-        upserts, removedIds, rightIsRemote_ && rightRemoteModel_, remoteRoot);
+        upserts, removedIds, rightIsRemote_ && rightRemoteModel_, remoteRoot,
+        [this](const QString &name) {
+            // A hidden folder that the view hides needs no listing either.
+            return (!rightRemoteModel_->showHidden() &&
+                    name.startsWith(QLatin1Char('.'))) ||
+                   rightRemoteModel_->hasEntry(name);
+        });
     if (!update.completionMessage.isEmpty())
         statusBar()->showMessage(update.completionMessage, 5000);
     for (const QString &localPath : update.completedDownloadPathsToOpen) {
         openLocalPathWithPreference(localPath);
         statusBar()->showMessage(tr("Downloaded: ") + localPath, 5000);
     }
-    if (update.scheduleRemoteRefresh)
+    for (const QString &path : update.uploadsInRemoteRoot)
+        uploadedRemoteRows_.insert(path);
+    uploadRefreshNeedsListing_ =
+        uploadRefreshNeedsListing_ || update.scheduleRemoteRefresh;
+    if (update.scheduleRemoteRefresh || !update.uploadsInRemoteRoot.isEmpty())
         uploadRefreshTimer_->start();
 }
 
@@ -1832,7 +1967,7 @@ void MainWindow::showOpenPathDialog(bool rightPane) {
     openscpui::OpenPathDialog dialog(
         currentPath, recentPaths,
         navigationStore_.favorites(location, remoteScope),
-        remote ? Qt::CaseSensitive : Qt::CaseInsensitive,
+        openscpui::NavigationStore::pathCaseSensitivity(location),
         mainWindowActionIcon(remote ? "action-open-folder-remote.svg"
                                     : "action-open-folder.svg"),
         this);
@@ -2455,11 +2590,9 @@ void MainWindow::updateDeleteShortcutEnables() {
         actNewDirLeft_->setEnabled(true); // always enabled on local
     if (actNewFileLeft_)
         actNewFileLeft_->setEnabled(true); // always enabled on local
-    if (actUpLeft_) {
-        QDir leftDir(leftPath_ ? leftPath_->path() : QString());
-        bool canUp = leftDir.cdUp();
-        actUpLeft_->setEnabled(canUp);
-    }
+    if (actUpLeft_)
+        actUpLeft_->setEnabled(
+            canGoUpLocally(leftPath_ ? leftPath_->path() : QString()));
 
     // Right: enable according to selection + permissions (exceptions: Up,
     // Upload, Download)
@@ -2532,8 +2665,7 @@ void MainWindow::updateDeleteShortcutEnables() {
             cur = normalizeRemotePath(cur);
             actUpRight_->setEnabled(!cur.isEmpty() && cur != "/");
         } else {
-            QDir currentDir(cur);
-            actUpRight_->setEnabled(currentDir.cdUp());
+            actUpRight_->setEnabled(canGoUpLocally(cur));
         }
     }
 }

@@ -1,5 +1,8 @@
 #include "logic/sync/SyncCoordinator.hpp"
 
+#include "logic/common/LocalLinks.hpp"
+#include "logic/common/MainWindowSharedUtils.hpp"
+#include "logic/common/UiFormatters.hpp"
 #include "logic/navigation/RemotePath.hpp"
 #include "logic/remote/RemoteOperationController.hpp"
 #include "logic/transfers/TransferManager.hpp"
@@ -21,10 +24,23 @@
 #include <filesystem>
 #include <limits>
 #include <mutex>
+#include <optional>
+#include <ratio>
+#include <system_error>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
 namespace {
+
+// Whether every name in a remote relative path can also name a local entry.
+bool isLocalRelativePath(const QString &relativePath) {
+    const QStringList names =
+        relativePath.split(QLatin1Char('/'), Qt::SkipEmptyParts);
+    return std::all_of(names.cbegin(), names.cend(), [](const QString &name) {
+        return isValidLocalEntryName(name);
+    });
+}
 
 constexpr quint64 kLargeTreeItems = 100'000;
 constexpr quint64 kLargeTreeKnownBytes = 100ULL * 1024ULL * 1024ULL * 1024ULL;
@@ -43,6 +59,71 @@ quint64 saturatingAdd(quint64 left, quint64 right) {
                ? std::numeric_limits<quint64>::max()
                : left + right;
 }
+
+// What the local scan records of one listed entry besides its name.
+struct ListedEntryFacts {
+    bool link = false;
+    SyncEntryType type = SyncEntryType::Other;
+    // Of a file, or -1 when unknown.
+    qint64 size = -1;
+    std::optional<qint64> modifiedMs;
+};
+
+#ifdef _WIN32
+// The listing already holds each entry's attributes, size and time, which a
+// QFileInfo would read again with one more file system call per entry. It
+// also takes a shortcut as the file it is, as LocalLinks.hpp wants.
+ListedEntryFacts
+listedEntryFacts(const std::filesystem::directory_entry &listed) {
+    ListedEntryFacts facts;
+    std::error_code error;
+    const std::filesystem::file_type kind = listed.symlink_status(error).type();
+    // MSVC gives junctions and other mount points a file type of their own.
+    facts.link = kind == std::filesystem::file_type::symlink ||
+                 kind == std::filesystem::file_type::junction;
+    // Links are skipped, and their size and time would be the target's.
+    if (facts.link)
+        return facts;
+    if (kind == std::filesystem::file_type::directory) {
+        facts.type = SyncEntryType::Directory;
+    } else if (kind == std::filesystem::file_type::regular) {
+        facts.type = SyncEntryType::File;
+        const std::uintmax_t size = listed.file_size(error);
+        if (!error)
+            facts.size = static_cast<qint64>(size);
+    }
+    // MSVC counts file times as FILETIME does, in 100-nanosecond units since
+    // 1601, and QFileInfo would give the same milliseconds since 1970.
+    static_assert(std::is_same_v<std::filesystem::file_time_type::period,
+                                 std::ratio<1, 10'000'000>>);
+    constexpr qint64 kUnixEpochInFileTimeMilliseconds = 11'644'473'600'000;
+    const std::filesystem::file_time_type modified =
+        listed.last_write_time(error);
+    if (!error) {
+        facts.modifiedMs = modified.time_since_epoch().count() / 10'000 -
+                           kUnixEpochInFileTimeMilliseconds;
+    }
+    return facts;
+}
+#else
+// POSIX listings carry at most the type, so QFileInfo reads the rest.
+ListedEntryFacts listedEntryFacts(const QFileInfo &info) {
+    ListedEntryFacts facts;
+    facts.link = isLocalLink(info);
+    if (facts.link)
+        return facts;
+    if (isLocalFolder(info)) {
+        facts.type = SyncEntryType::Directory;
+    } else if (isLocalFile(info)) {
+        facts.type = SyncEntryType::File;
+        facts.size = localFileSize(info);
+    }
+    const QDateTime modified = localModificationTime(info);
+    if (modified.isValid())
+        facts.modifiedMs = modified.toMSecsSinceEpoch();
+    return facts;
+}
+#endif
 
 QString parentRelativePath(const QString &relativePath) {
     const qsizetype separator = relativePath.lastIndexOf(QLatin1Char('/'));
@@ -129,6 +210,15 @@ SyncCoordinator::SyncCoordinator(RemoteOperationController *remoteOperations,
                 if (relative.isEmpty()) {
                     ++state->result.invalidNames;
                     state->result.coverage.remoteUnscannedPaths.insert({});
+                    continue;
+                }
+                // A name this computer cannot hold, such as "a:b" on Windows,
+                // is left out: it is neither downloaded nor, absent from the
+                // scan, deleted by a mirror.
+                if (!isLocalRelativePath(relative)) {
+                    ++state->result.invalidNames;
+                    state->result.coverage.remoteUnscannedPaths.insert(
+                        relative);
                     continue;
                 }
 
@@ -383,7 +473,11 @@ void SyncCoordinator::startChecksums(const QString &localRoot,
         qsizetype completedChecksums = 0;
         const QString canonicalRoot =
             QFileInfo(state->localRoot).canonicalFilePath();
-        const QString confinedPrefix = canonicalRoot + QDir::separator();
+        // Canonical paths use '/' on every platform, and a root such as "/"
+        // or "C:/" already ends with one.
+        const QString confinedPrefix = canonicalRoot.endsWith(QLatin1Char('/'))
+                                           ? canonicalRoot
+                                           : canonicalRoot + QLatin1Char('/');
         auto canceled = [&] {
             return stopToken.stop_requested() || state->canceled->load();
         };
@@ -415,11 +509,11 @@ void SyncCoordinator::startChecksums(const QString &localRoot,
             const QString localPath =
                 joinedLocalPath(state->localRoot, relativePath);
             const QFileInfo fileInfo(localPath);
-            const QString canonicalFile = fileInfo.canonicalFilePath();
+            const QString canonicalFile = localCanonicalPath(fileInfo);
             const bool confined = !canonicalRoot.isEmpty() &&
                                   !canonicalFile.isEmpty() &&
                                   canonicalFile.startsWith(confinedPrefix);
-            if (!confined || fileInfo.isSymLink() || !fileInfo.isFile()) {
+            if (!confined || isLocalLink(fileInfo) || !isLocalFile(fileInfo)) {
                 failures.push_back(
                     SyncCoordinator::tr(
                         "%1: the local file is unavailable or outside "
@@ -444,8 +538,9 @@ void SyncCoordinator::startChecksums(const QString &localRoot,
             }
 
             QCryptographicHash hash(QCryptographicHash::Sha256);
+            const qint64 fileSize = localFileSize(fileInfo);
             const quint64 totalBytes =
-                fileInfo.size() > 0 ? static_cast<quint64>(fileInfo.size()) : 0;
+                fileSize > 0 ? static_cast<quint64>(fileSize) : 0;
             quint64 processedBytes = 0;
             auto lastProgress =
                 std::chrono::steady_clock::now() - std::chrono::seconds(1);
@@ -715,7 +810,13 @@ void SyncCoordinator::start(const QString &localRoot,
                     unscannedPaths.insert(node.relativePath);
                     continue;
                 }
-                if (info.isSymLink()) {
+#ifdef _WIN32
+                const ListedEntryFacts facts =
+                    listedEntryFacts(*directoryEntry);
+#else
+                const ListedEntryFacts facts = listedEntryFacts(info);
+#endif
+                if (facts.link) {
                     ++skippedSymlinks;
                     unscannedPaths.insert(normalized);
                     continue;
@@ -731,33 +832,20 @@ void SyncCoordinator::start(const QString &localRoot,
                 entry.relativePath = normalized;
                 // FIFOs, sockets and devices are neither, and are never
                 // copied: reading a FIFO would block the transfer.
-                if (info.isDir())
-                    entry.type = SyncEntryType::Directory;
-                else if (info.isFile())
-                    entry.type = SyncEntryType::File;
-                else
-                    entry.type = SyncEntryType::Other;
-                if (info.isFile()) {
-                    const qint64 size = info.size();
-                    if (size >= 0) {
-                        entry.size = quint64(size);
-                        if (quint64(size) >
-                            std::numeric_limits<quint64>::max() - knownBytes) {
-                            knownBytes = std::numeric_limits<quint64>::max();
-                        } else {
-                            knownBytes += quint64(size);
-                        }
+                entry.type = facts.type;
+                if (facts.type == SyncEntryType::File) {
+                    if (facts.size >= 0) {
+                        entry.size = quint64(facts.size);
+                        knownBytes = saturatingAdd(knownBytes, *entry.size);
                     } else {
                         ++unknownSizes;
                     }
                 }
-                const QDateTime modified = info.lastModified();
-                if (modified.isValid())
-                    entry.modifiedMs = modified.toMSecsSinceEpoch();
+                entry.modifiedMs = facts.modifiedMs;
                 snapshot.push_back(std::move(entry));
                 ++itemCount;
 
-                if (info.isDir()) {
+                if (facts.type == SyncEntryType::Directory) {
                     if (node.depth + 1 >= kMaximumDepth) {
                         ++depthLimits;
                         unscannedPaths.insert(normalized);
@@ -868,30 +956,54 @@ void SyncCoordinator::maybeFinish(
     }
     if (state->result.skippedSymlinks > 0) {
         state->result.warnings.push_back(
-            tr("%1 symbolic links were skipped.")
-                .arg(state->result.skippedSymlinks));
+            tr("%n symbolic links were skipped.", nullptr,
+               pluralCount(state->result.skippedSymlinks)));
     }
     if (state->result.depthLimits > 0) {
         state->result.warnings.push_back(
-            tr("%1 folders reached the maximum depth of %2.")
-                .arg(state->result.depthLimits)
+            tr("%n folders reached the maximum depth of %1.", nullptr,
+               pluralCount(state->result.depthLimits))
                 .arg(kMaximumDepth));
     }
     if (state->result.inaccessibleFolders > 0) {
         state->result.warnings.push_back(
-            tr("%1 folders could not be read.")
-                .arg(state->result.inaccessibleFolders));
+            tr("%n folders could not be read.", nullptr,
+               pluralCount(state->result.inaccessibleFolders)));
     }
     if (state->result.invalidNames > 0) {
         state->result.warnings.push_back(
-            tr("%1 entries with unsafe names were skipped.")
-                .arg(state->result.invalidNames));
+            tr("%n entries with unsafe names were skipped.", nullptr,
+               pluralCount(state->result.invalidNames)));
     }
     if (state->result.unknownSizes > 0) {
-        state->result.warnings.push_back(tr("%1 files have an unknown size.")
-                                             .arg(state->result.unknownSizes));
+        state->result.warnings.push_back(
+            tr("%n files have an unknown size.", nullptr,
+               pluralCount(state->result.unknownSizes)));
     }
     emit preparationReady(state->result);
+}
+
+void SyncCoordinator::applyChecksums(
+    const SyncChecksumResult &result, QVector<SyncSnapshotEntry> &localSnapshot,
+    QVector<SyncSnapshotEntry> &remoteSnapshot) {
+    const auto apply = [&result](QVector<SyncSnapshotEntry> &snapshot,
+                                 bool local) {
+        for (SyncSnapshotEntry &entry : snapshot) {
+            const auto localChecksum =
+                result.localChecksums.constFind(entry.relativePath);
+            const auto remoteChecksum =
+                result.remoteChecksums.constFind(entry.relativePath);
+            if (localChecksum == result.localChecksums.cend() ||
+                remoteChecksum == result.remoteChecksums.cend()) {
+                continue;
+            }
+            entry.checksumAlgorithm = result.algorithm;
+            entry.checksum =
+                local ? localChecksum.value() : remoteChecksum.value();
+        }
+    };
+    apply(localSnapshot, true);
+    apply(remoteSnapshot, false);
 }
 
 quint64 SyncCoordinator::enqueuePlan(const SyncExecutionPlan &plan,

@@ -5,6 +5,7 @@
 #include "logic/common/MainWindowSharedUtils.hpp"
 #include "logic/common/StagingStore.hpp"
 #include "logic/common/UiAlerts.hpp"
+#include "logic/common/UiFormatters.hpp"
 #include "logic/remote/RemoteModel.hpp"
 #include "logic/remote/RemoteOperationController.hpp"
 #include "logic/transfers/TransferManager.hpp"
@@ -40,6 +41,7 @@
 #include <functional>
 #include <limits>
 #include <memory>
+#include <optional>
 
 Q_LOGGING_CATEGORY(ocEnum, "openscp.enum")
 Q_LOGGING_CATEGORY(ocDrag, "openscp.drag")
@@ -47,6 +49,13 @@ Q_LOGGING_CATEGORY(ocDrag, "openscp.drag")
 namespace {
 
 constexpr int kScrollBarHideDelayMs = 1500;
+// The panels hide idle scroll bars as macOS does. Elsewhere a hidden bar
+// cannot be dragged with the mouse, and its return shifts the columns.
+#ifdef Q_OS_MACOS
+constexpr bool kAutoHideScrollBars = true;
+#else
+constexpr bool kAutoHideScrollBars = false;
+#endif
 
 QString stagingRootFromSettings() {
     openscpui::AppSettings settings;
@@ -61,11 +70,31 @@ QString normalizeStagingName(const QString &value) {
 #endif
 }
 
-QPair<QString, QString> splitNameMultiExt(const QString &fileName) {
-    const qsizetype firstDot = fileName.indexOf('.', 1);
-    if (firstDot <= 0)
-        return qMakePair(fileName, QString());
-    return qMakePair(fileName.left(firstDot), fileName.mid(firstDot));
+// The staging path of a remote entry below `localRoot`, or nothing when one
+// of its names cannot be a local name.
+std::optional<QString> stagingPathFor(const QString &localRoot,
+                                      const QString &relativePath) {
+    if (relativePath.isEmpty())
+        return std::nullopt;
+    const QStringList parts =
+        relativePath.split(QLatin1Char('/'), Qt::SkipEmptyParts);
+    QStringList normalizedParts;
+    normalizedParts.reserve(parts.size());
+    for (const QString &part : parts) {
+        if (!isValidLocalEntryName(part))
+            return std::nullopt;
+        normalizedParts.push_back(normalizeStagingName(part));
+    }
+    return QDir(localRoot).filePath(normalizedParts.join(QLatin1Char('/')));
+}
+
+// The key under which two staged paths are one entry on the local volume.
+QString stagingPathKey(const QString &path) {
+    QString key = normalizeStagingName(QDir::cleanPath(path));
+#if defined(Q_OS_MAC) || defined(Q_OS_WIN)
+    key = key.toCaseFolded();
+#endif
+    return key;
 }
 
 QPair<int, quint64> loadStagingConfirmThresholds() {
@@ -116,27 +145,29 @@ struct DragAwareTreeView::RemoteDragStagingState {
 DragAwareTreeView::DragAwareTreeView(QWidget *parent) : QTreeView(parent) {
     new openscpui::KeyboardFocusIndicator(this);
 
-    scrollBarHideTimer_ = new QTimer(this);
-    scrollBarHideTimer_->setInterval(kScrollBarHideDelayMs);
-    scrollBarHideTimer_->setSingleShot(true);
-    connect(scrollBarHideTimer_, &QTimer::timeout, this,
-            &DragAwareTreeView::hideScrollBars);
+    if constexpr (kAutoHideScrollBars) {
+        scrollBarHideTimer_ = new QTimer(this);
+        scrollBarHideTimer_->setInterval(kScrollBarHideDelayMs);
+        scrollBarHideTimer_->setSingleShot(true);
+        connect(scrollBarHideTimer_, &QTimer::timeout, this,
+                &DragAwareTreeView::hideScrollBars);
 
-    const auto observeScrollBar = [this](QScrollBar *scrollBar) {
-        connect(scrollBar, &QScrollBar::valueChanged, this,
-                [this] { showScrollBarsTemporarily(); });
-        connect(scrollBar, &QScrollBar::sliderPressed, this, [this] {
-            scrollBarInteractionActive_ = true;
-            scrollBarHideTimer_->stop();
-        });
-        connect(scrollBar, &QScrollBar::sliderReleased, this, [this] {
-            scrollBarInteractionActive_ = false;
-            showScrollBarsTemporarily();
-        });
-    };
-    observeScrollBar(verticalScrollBar());
-    observeScrollBar(horizontalScrollBar());
-    showScrollBarsTemporarily();
+        const auto observeScrollBar = [this](QScrollBar *scrollBar) {
+            connect(scrollBar, &QScrollBar::valueChanged, this,
+                    [this] { showScrollBarsTemporarily(); });
+            connect(scrollBar, &QScrollBar::sliderPressed, this, [this] {
+                scrollBarInteractionActive_ = true;
+                scrollBarHideTimer_->stop();
+            });
+            connect(scrollBar, &QScrollBar::sliderReleased, this, [this] {
+                scrollBarInteractionActive_ = false;
+                showScrollBarsTemporarily();
+            });
+        };
+        observeScrollBar(verticalScrollBar());
+        observeScrollBar(horizontalScrollBar());
+        showScrollBarsTemporarily();
+    }
 }
 
 void DragAwareTreeView::setTransferManager(TransferManager *mgr) {
@@ -170,7 +201,7 @@ void DragAwareTreeView::wheelEvent(QWheelEvent *event) {
 }
 
 void DragAwareTreeView::showScrollBarsTemporarily() {
-    if (updatingScrollBarVisibility_)
+    if (!scrollBarHideTimer_ || updatingScrollBarVisibility_)
         return;
 
     updatingScrollBarVisibility_ = true;
@@ -222,42 +253,33 @@ void DragAwareTreeView::startDrag(Qt::DropActions supportedActions) {
     drag->exec(Qt::CopyAction);
 }
 
-void DragAwareTreeView::showKeepMessage(const QString &batchDir) {
+void DragAwareTreeView::showKeepMessage(const QString &batchDir,
+                                        const QString &prefix) {
     auto *mainWindow = qobject_cast<QMainWindow *>(window());
     if (!mainWindow)
         return;
+    // The link needs rich text, where a folder named "R&D" or "<b>" would be
+    // markup; both the folder and the prefix are escaped.
+    const QString url =
+        QUrl::fromLocalFile(batchDir).toString(QUrl::FullyEncoded);
+    const QString folder = batchDir.toHtmlEscaped();
     auto *statusLabel = new QLabel(mainWindow);
     statusLabel->setTextFormat(Qt::RichText);
-    const QString url = QUrl::fromLocalFile(batchDir).toString();
     statusLabel->setText(
-        tr("Staging kept at: <a href=\"%1\">%2</a>").arg(url, batchDir));
+        prefix.isEmpty()
+            ? tr("Staging kept at: <a href=\"%1\">%2</a>")
+                  .arg(url.toHtmlEscaped(), folder)
+            : QStringLiteral("%1 <a href=\"%2\">%3</a>")
+                  .arg(prefix.toHtmlEscaped(), url.toHtmlEscaped(), folder));
     statusLabel->setOpenExternalLinks(true);
     statusLabel->setCursor(Qt::PointingHandCursor);
     mainWindow->statusBar()->addPermanentWidget(statusLabel, 0);
-    QTimer::singleShot(10000, statusLabel, [mainWindow, statusLabel] {
-        mainWindow->statusBar()->removeWidget(statusLabel);
-        statusLabel->deleteLater();
-    });
-}
-
-void DragAwareTreeView::showKeepMessageWithPrefix(const QString &prefix,
-                                                  const QString &batchDir) {
-    auto *mainWindow = qobject_cast<QMainWindow *>(window());
-    if (!mainWindow)
-        return;
-    auto *statusLabel = new QLabel(mainWindow);
-    statusLabel->setTextFormat(Qt::RichText);
-    const QString url = QUrl::fromLocalFile(batchDir).toString();
-    const QString statusText =
-        QString("%1 <a href=\"%2\">%3</a>").arg(prefix, url, batchDir);
-    statusLabel->setText(statusText);
-    statusLabel->setOpenExternalLinks(true);
-    statusLabel->setCursor(Qt::PointingHandCursor);
-    mainWindow->statusBar()->addPermanentWidget(statusLabel, 0);
-    QTimer::singleShot(12000, statusLabel, [mainWindow, statusLabel] {
-        mainWindow->statusBar()->removeWidget(statusLabel);
-        statusLabel->deleteLater();
-    });
+    // A message with a prefix says more, so it stays longer.
+    QTimer::singleShot(prefix.isEmpty() ? 10000 : 12000, statusLabel,
+                       [mainWindow, statusLabel] {
+                           mainWindow->statusBar()->removeWidget(statusLabel);
+                           statusLabel->deleteLater();
+                       });
 }
 
 QString DragAwareTreeView::buildStagingRoot() const {
@@ -376,8 +398,21 @@ void DragAwareTreeView::finishRemoteDragEnumeration() {
     currentBatchTotal_ = static_cast<int>(std::min<quint64>(
         enumeratedItems,
         static_cast<quint64>(std::numeric_limits<int>::max())));
+    const QString skipped =
+        leftOutSummary({.invalidNames = enumInvalidNames_,
+                        .unlistedFolders = enumInaccessible_,
+                        .skippedLinks = enumSymlinksSkipped_,
+                        .depthLimits = enumDepthLimits_});
+    auto *mainWindow = qobject_cast<QMainWindow *>(window());
     if (enumTargets_.isEmpty() && enumDirectories_.isEmpty()) {
         hidePrepOverlay();
+        if (mainWindow) {
+            mainWindow->statusBar()->showMessage(
+                skipped.isEmpty()
+                    ? tr("Nothing to drag")
+                    : tr("Nothing to drag") + QStringLiteral("  |  ") + skipped,
+                8000);
+        }
         QDir(currentBatchDir_).removeRecursively();
         logBatchResult(
             currentBatchId_, 0, 0,
@@ -429,6 +464,12 @@ void DragAwareTreeView::finishRemoteDragEnumeration() {
         cancelCurrentBatch(QStringLiteral("threshold"));
         return;
     }
+    if (mainWindow && !skipped.isEmpty()) {
+        mainWindow->statusBar()->showMessage(
+            tr("Some items will not be dragged") + QStringLiteral("  |  ") +
+                skipped,
+            8000);
+    }
     QVector<RemoteDragTarget> targets = std::move(enumTargets_);
     QStringList directories = std::move(enumDirectories_);
     QStringList dragRoots = std::move(enumDragRoots_);
@@ -469,9 +510,8 @@ bool DragAwareTreeView::confirmRemoteDragThreshold(
                              static_cast<qint64>(stats.totalBytes), 1,
                              QLocale::DataSizeIecFormat));
     }
-    box.setText(tr("You are about to prepare %1 items%2. Continue?")
-                    .arg(QLocale().toString(static_cast<qulonglong>(
-                        stats.totalItems + stats.totalDirs)))
+    box.setText(tr("You are about to prepare %Ln items%1. Continue?", nullptr,
+                   pluralCount(stats.totalItems + stats.totalDirs))
                     .arg(sizePart));
     auto *yesButton = box.addButton(tr("Continue"), QMessageBox::AcceptRole);
     box.addButton(tr("Cancel"), QMessageBox::RejectRole);
@@ -528,19 +568,12 @@ void DragAwareTreeView::startRemoteDragStaging(
     state->batchOptions.batchId =
         transferMgr_->createBatch(state->batchOptions);
 
-    auto pathKey = [](const QString &path) {
-        QString key = normalizeStagingName(QDir::cleanPath(path));
-#if defined(Q_OS_MAC) || defined(Q_OS_WIN)
-        key = key.toCaseFolded();
-#endif
-        return key;
-    };
     QSet<QString> seenDirectories;
     for (const QString &directory : directories) {
         const QString normalized = QDir::cleanPath(directory);
         const QString relative =
             QDir(currentBatchDir_).relativeFilePath(normalized);
-        const QString key = pathKey(normalized);
+        const QString key = stagingPathKey(normalized);
         if (relative == QLatin1String("..") ||
             relative.startsWith(QStringLiteral("../")) ||
             seenDirectories.contains(key)) {
@@ -653,31 +686,20 @@ void DragAwareTreeView::pumpRemoteDragStaging(
         state->backpressurePaused = false;
     }
 
-    auto pathKey = [](const QString &path) {
-        QString key = normalizeStagingName(QDir::cleanPath(path));
-#if defined(Q_OS_MAC) || defined(Q_OS_WIN)
-        key = key.toCaseFolded();
-#endif
-        return key;
-    };
-    auto uniqueFullPath = [&state, &pathKey](const QString &fullPath) {
+    auto uniqueFullPath = [&state](const QString &fullPath) {
         const QFileInfo fileInfo(fullPath);
         const QString dirPath = fileInfo.dir().absolutePath();
         const QString normalizedName =
             normalizeStagingName(fileInfo.fileName());
-        const auto parts = splitNameMultiExt(normalizedName);
-        const QString baseName = parts.first;
-        const QString extension = parts.second;
-        const QString originalKey = pathKey(fullPath);
+        const QString originalKey = stagingPathKey(fullPath);
         int suffix = state->nextCollisionSuffix.value(originalKey, 0);
         while (true) {
-            const QString name = suffix == 0 ? normalizedName
-                                             : QStringLiteral("%1 (%2)%3")
-                                                   .arg(baseName)
-                                                   .arg(suffix)
-                                                   .arg(extension);
+            // Named as a download renamed to keep an existing file.
+            const QString name = suffix == 0
+                                     ? normalizedName
+                                     : numberedFileName(normalizedName, suffix);
             const QString candidate = QDir(dirPath).filePath(name);
-            const QString key = pathKey(candidate);
+            const QString key = stagingPathKey(candidate);
             if (!state->reservedPaths.contains(key) &&
                 !QFileInfo::exists(candidate)) {
                 state->reservedPaths.insert(key);
@@ -940,10 +962,10 @@ void DragAwareTreeView::finishRemoteDragStaging(
 
     if (state->failed > 0) {
         const QString prefix =
-            tr("%1 of %2 staging operations failed. Files kept at:")
-                .arg(state->failed)
-                .arg(total);
-        showKeepMessageWithPrefix(prefix, currentBatchDir_);
+            tr("%1 of %n staging operations failed. Files kept at:", nullptr,
+               total)
+                .arg(state->failed);
+        showKeepMessage(currentBatchDir_, prefix);
         finishBatch(QStringLiteral("partial-fail"), state->failed);
         return;
     }
@@ -959,9 +981,9 @@ void DragAwareTreeView::finishRemoteDragStaging(
         urls << QUrl::fromLocalFile(normalized);
     }
     if (urls.isEmpty()) {
-        showKeepMessageWithPrefix(
-            tr("No staged drag roots were available. Files kept at:"),
-            currentBatchDir_);
+        showKeepMessage(
+            currentBatchDir_,
+            tr("No staged drag roots were available. Files kept at:"));
         finishBatch(QStringLiteral("missing-roots"), 1);
         return;
     }
@@ -1058,49 +1080,18 @@ void DragAwareTreeView::startRemoteDragAsync(RemoteModel *remoteModel) {
                 return;
             const QString &localRoot = rootIt.value();
             for (const auto &entry : batch.entries) {
-                if (entry.info.is_dir) {
-                    bool valid = !entry.relativePath.isEmpty();
-                    QStringList normalizedParts;
-                    const QStringList parts = entry.relativePath.split(
-                        QLatin1Char('/'), Qt::SkipEmptyParts);
-                    normalizedParts.reserve(parts.size());
-                    for (const QString &part : parts) {
-                        QString why;
-                        if (!isValidEntryName(part, &why)) {
-                            valid = false;
-                            break;
-                        }
-                        normalizedParts.push_back(normalizeStagingName(part));
-                    }
-                    if (!valid) {
-                        ++enumInvalidNames_;
-                        continue;
-                    }
-                    enumDirectories_.push_back(QDir(localRoot).filePath(
-                        normalizedParts.join(QLatin1Char('/'))));
-                    ++enumStats_.totalDirs;
-                    continue;
-                }
-                bool valid = !entry.relativePath.isEmpty();
-                QStringList normalizedParts;
-                const QStringList parts = entry.relativePath.split(
-                    QLatin1Char('/'), Qt::SkipEmptyParts);
-                normalizedParts.reserve(parts.size());
-                for (const QString &part : parts) {
-                    QString why;
-                    if (!isValidEntryName(part, &why)) {
-                        valid = false;
-                        break;
-                    }
-                    normalizedParts.push_back(normalizeStagingName(part));
-                }
-                if (!valid) {
+                const std::optional<QString> localPath =
+                    stagingPathFor(localRoot, entry.relativePath);
+                if (!localPath) {
                     ++enumInvalidNames_;
                     continue;
                 }
-                const QString localPath = QDir(localRoot).filePath(
-                    normalizedParts.join(QLatin1Char('/')));
-                enumTargets_.push_back({entry.path, localPath});
+                if (entry.info.is_dir) {
+                    enumDirectories_.push_back(*localPath);
+                    ++enumStats_.totalDirs;
+                    continue;
+                }
+                enumTargets_.push_back({entry.path, *localPath});
                 ++enumStats_.totalItems;
                 if (entry.info.has_size) {
                     const quint64 available =
@@ -1157,7 +1148,7 @@ void DragAwareTreeView::startRemoteDragAsync(RemoteModel *remoteModel) {
             continue;
         const QString name = remoteModel->nameAt(index);
         QString why;
-        if (!isValidEntryName(name, &why)) {
+        if (!isValidLocalEntryName(name, &why)) {
             ++enumInvalidNames_;
             continue;
         }

@@ -29,8 +29,9 @@ class DragAwareTreeView : public QTreeView {
     // drag-out
     void setTransferManager(TransferManager *mgr);
     void setRemoteOperationController(RemoteOperationController *controller);
-    // Tells the user, with a link, that a staging batch was kept.
-    void showKeepMessage(const QString &batchDir);
+    // Tells the user, with a link, that a staging batch was kept, after
+    // `prefix` when one is given.
+    void showKeepMessage(const QString &batchDir, const QString &prefix = {});
 
     protected:
     void startDrag(Qt::DropActions supportedActions) override;
@@ -42,8 +43,6 @@ class DragAwareTreeView : public QTreeView {
     private:
     void showScrollBarsTemporarily();
     void hideScrollBars();
-    void showKeepMessageWithPrefix(const QString &prefix,
-                                   const QString &batchDir);
     // Remote -> system drag-out: prepare asynchronously using TransferManager
     void startRemoteDragAsync(class RemoteModel *remoteModel);
     using RemoteDragTarget = QPair<QString, QString>; // remote, local

@@ -3,6 +3,7 @@
 #include "logic/common/AppSettings.hpp"
 #include "logic/common/MainWindowSharedUtils.hpp"
 #include "logic/common/UiAlerts.hpp"
+#include "logic/common/UiFormatters.hpp"
 #include "logic/connections/SessionController.hpp"
 #include "logic/connections/TlsKeyTrust.hpp"
 #include "logic/persistence/SavedSitesPersistence.hpp"
@@ -10,9 +11,11 @@
 #include "logic/remote/RemoteModel.hpp"
 #include "logic/remote/RemoteOperationController.hpp"
 #include "logic/sync/SyncCoordinator.hpp"
+#include "logic/transfers/MarkOfTheWeb.hpp"
 #include "logic/transfers/TransferManager.hpp"
 #include "openscp/ClientFactory.hpp"
 #include "openscp/RuntimeLogging.hpp"
+#include "widgets/common/FocusTraversalController.hpp"
 #include "widgets/dialogs/AuthenticationInput.hpp"
 #include "widgets/dialogs/ConnectionDialog.hpp"
 #include "widgets/dialogs/SiteManagerDialog.hpp"
@@ -91,6 +94,15 @@ normalizedIdentityScpMode(const openscp::SessionOptions &opt) {
     if (opt.protocol != openscp::Protocol::Scp)
         return openscp::ScpTransferMode::Auto;
     return opt.scp_transfer_mode;
+}
+
+// setModel() keeps the previous selection model alive and listening to its
+// model; no other view shares the right panel's.
+void setPanelModel(QAbstractItemView *view, QAbstractItemModel *model) {
+    QItemSelectionModel *previous = view->selectionModel();
+    view->setModel(model);
+    if (previous && previous != view->selectionModel())
+        previous->deleteLater();
 }
 
 QString protocolDisplayLabel(openscp::Protocol protocol) {
@@ -210,7 +222,7 @@ QString ensureUniqueQuickSiteName(const QVector<SiteEntry> &sites,
         return base;
     for (int suffixNumber = 2; suffixNumber < 10000; ++suffixNumber) {
         const QString candidate =
-            QString("%1 (%2)").arg(base).arg(suffixNumber);
+            QString("%1 (%2)").arg(base, QString::number(suffixNumber));
         if (!exists(candidate))
             return candidate;
     }
@@ -338,17 +350,6 @@ void MainWindow::openConnectDialogWithPreset(
             tr("Connection canceled: invalid transport configuration"), 5000);
         return;
     }
-#ifdef Q_OS_WIN
-    if (hasConfiguredJumpHost(sessionOptions)) {
-        UiAlerts::warning(
-            this, tr("Unsupported transport"),
-            tr("SSH jump host is currently unavailable on Windows."));
-        statusBar()->showMessage(
-            tr("Connection canceled: SSH jump host is unsupported on Windows"),
-            5000);
-        return;
-    }
-#endif
     if (saveRequest.has_value()) {
         maybePersistQuickConnectSite(sessionOptions, *saveRequest, false);
         // Already persisted on request; connection lifecycle no longer needs to
@@ -402,6 +403,7 @@ void MainWindow::applyDisconnectLocalUiState() {
         if (activeRemoteListJob_ != 0)
             remoteOps_->cancel(activeRemoteListJob_);
         activeRemoteListJob_ = 0;
+        remoteRefreshPending_ = false;
         remoteOps_->clearSession();
     }
     if (syncCoordinator_)
@@ -415,7 +417,7 @@ void MainWindow::applyDisconnectLocalUiState() {
     // Switch UI immediately to local/local so the app remains usable while
     // transfer workers unwind in the background.
     if (rightRemoteModel_) {
-        rightView_->setModel(rightLocalModel_);
+        setPanelModel(rightView_, rightLocalModel_);
         if (rightView_->selectionModel()) {
             connect(rightView_->selectionModel(),
                     &QItemSelectionModel::selectionChanged, this,
@@ -428,6 +430,9 @@ void MainWindow::applyDisconnectLocalUiState() {
     activateScpTransferModeUi(false);
     transferUiController_.reset();
     uploadRefreshTimer_->stop();
+    uploadedRemoteRows_.clear();
+    uploadRefreshNeedsListing_ = false;
+    uploadStatJobs_.clear();
     restoreRightHeaderState(false);
     if (QDir(rightPath_->path()).exists()) {
         setRightRoot(rightPath_->path());
@@ -455,10 +460,11 @@ void MainWindow::applyDisconnectLocalUiState() {
         actChooseRight_->setIcon(
             QIcon(QLatin1String(":/assets/icons/action-open-folder.svg")));
         actChooseRight_->setEnabled(true);
-        actChooseRight_->setToolTip(actChooseRight_->text());
+        actChooseRight_->setToolTip(actChooseRight_->iconText());
     }
     if (rightView_)
-        rightView_->setEnabled(true);
+        openscpui::enableRestoringFocus(
+            rightView_, std::exchange(remoteViewHadFocus_, false));
     setWindowTitle(tr("OpenSCP — local/local"));
     updateDeleteShortcutEnables();
 }
@@ -519,7 +525,7 @@ bool MainWindow::runDisconnectTransferCleanupAsync(quint64 disconnectSeq) {
                         !self->rightIsRemote_) {
                         if (self->actConnect_)
                             self->actConnect_->setToolTip(
-                                self->actConnect_->text());
+                                self->actConnect_->iconText());
                         self->statusBar()->showMessage(
                             tr("Background transfer cleanup finished"), 3000);
                     }
@@ -540,9 +546,9 @@ bool MainWindow::runDisconnectTransferCleanupAsync(quint64 disconnectSeq) {
     return true;
 }
 
-void MainWindow::disconnectRemote() {
+bool MainWindow::disconnectRemote() {
     if (sessionController_->isDisconnecting())
-        return;
+        return true;
 
     if (transferMgr_) {
         const QString sessionKey = transferMgr_->sessionIdentity();
@@ -553,9 +559,8 @@ void MainWindow::disconnectRemote() {
             UiAlerts::configure(choice);
             choice.setIcon(QMessageBox::Question);
             choice.setWindowTitle(tr("Transfers are still active"));
-            choice.setText(
-                tr("%1 transfer(s) are still active for this session.")
-                    .arg(activeTaskIds.size()));
+            choice.setText(tr("%n transfers are still active for this session.",
+                              nullptr, pluralCount(activeTaskIds.size())));
             choice.setInformativeText(
                 tr("Choose whether to keep their progress for the next "
                    "connection, cancel them, or stay connected."));
@@ -569,13 +574,13 @@ void MainWindow::disconnectRemote() {
             choice.exec();
             if (choice.clickedButton() == stayButton ||
                 !choice.clickedButton()) {
-                return;
+                return false;
             }
             if (choice.clickedButton() == cancelButton) {
                 for (quint64 taskId : activeTaskIds)
                     transferMgr_->cancelTask(taskId);
             } else if (choice.clickedButton() != pauseButton) {
-                return;
+                return false;
             }
         }
     }
@@ -585,11 +590,12 @@ void MainWindow::disconnectRemote() {
     scheduleDisconnectWatchdog(disconnectSeq);
 
     if (runDisconnectTransferCleanupAsync(disconnectSeq))
-        return;
+        return true;
 
     transferCleanupInProgress_ = false;
     transferCleanupStartedAtMs_ = 0;
     completeDisconnectRemote(disconnectSeq, false);
+    return true;
 }
 
 void MainWindow::persistActiveSitePaths() {
@@ -646,7 +652,7 @@ void MainWindow::completeDisconnectRemote(quint64 disconnectSeq, bool forced) {
     resetConnectionSessionIndicators();
     if (actConnect_) {
         actConnect_->setEnabled(true);
-        actConnect_->setToolTip(actConnect_->text());
+        actConnect_->setToolTip(actConnect_->iconText());
     }
 
     // Per spec: non‑modal Site Manager after disconnect (if enabled), without
@@ -745,8 +751,7 @@ bool MainWindow::confirmInsecureHostPolicyForSession(
                                     : QStringLiteral("ssh-unverified")));
     const QString allowKey =
         QString("Security/insecureTransportConfirmedUntilUtc/%1/%2:%3")
-            .arg(riskKey, hostKey)
-            .arg(static_cast<int>(opt.port));
+            .arg(riskKey, hostKey, QString::number(static_cast<int>(opt.port)));
     const qint64 now = QDateTime::currentSecsSinceEpoch();
     openscpui::AppSettings settings;
     const qint64 allowedUntil = settings.value(allowKey, 0).toLongLong();
@@ -893,15 +898,11 @@ void MainWindow::showHostKeyPrompt(
         text = (tr("Connect to %1\nAlgorithm: %2\nFingerprint: "
                    "%3\n\nFingerprint cannot be saved. Connection "
                    "allowed only this time."))
-                   .arg(prompt.host)
-                   .arg(prompt.algorithm)
-                   .arg(prompt.fingerprint);
+                   .arg(prompt.host, prompt.algorithm, prompt.fingerprint);
     } else {
         text = (tr("Connect to %1\nAlgorithm: %2\nFingerprint: "
                    "%3\n\nTrust and save to known_hosts?"))
-                   .arg(prompt.host)
-                   .arg(prompt.algorithm)
-                   .arg(prompt.fingerprint);
+                   .arg(prompt.host, prompt.algorithm, prompt.fingerprint);
     }
     box->setText(text);
     box->addButton(prompt.canSave ? tr("Trust") : tr("Connect without saving"),
@@ -1019,17 +1020,6 @@ bool MainWindow::validateConnectionStart(const openscp::SessionOptions &opt) {
             tr("Connection canceled: invalid transport configuration"), 5000);
         return false;
     }
-#ifdef Q_OS_WIN
-    if (hasConfiguredJumpHost(opt)) {
-        UiAlerts::warning(
-            this, tr("Unsupported transport"),
-            tr("SSH jump host is currently unavailable on Windows."));
-        statusBar()->showMessage(
-            tr("Connection canceled: SSH jump host is unsupported on Windows"),
-            5000);
-        return false;
-    }
-#endif
     if (!confirmInsecureHostPolicyForSession(opt)) {
         statusBar()->showMessage(
             tr("Connection canceled: security exception not confirmed"), 5000);
@@ -1485,7 +1475,7 @@ void MainWindow::maybePersistQuickConnectSite(
 void MainWindow::applyRemoteConnectedUI(const openscp::SessionOptions &opt) {
     saveRightHeaderState(rightIsRemote_);
     if (rightRemoteModel_) {
-        rightView_->setModel(rightLocalModel_);
+        setPanelModel(rightView_, rightLocalModel_);
         delete rightRemoteModel_;
         rightRemoteModel_ = nullptr;
     }
@@ -1557,7 +1547,7 @@ void MainWindow::applyRemoteConnectedUI(const openscp::SessionOptions &opt) {
                     }
                 });
         activateScpTransferModeUi(false);
-        rightView_->setModel(rightRemoteModel_);
+        setPanelModel(rightView_, rightRemoteModel_);
         if (rightView_->selectionModel()) {
             connect(rightView_->selectionModel(),
                     &QItemSelectionModel::selectionChanged, this,
@@ -1583,6 +1573,7 @@ void MainWindow::applyRemoteConnectedUI(const openscp::SessionOptions &opt) {
         transferUiController_.reset();
         if (transferMgr_) {
             transferMgr_->setSessionIdentity(remoteNavigationScope());
+            transferMgr_->setDownloadOrigin(openscpui::downloadOriginUrl(opt));
             transferMgr_->setConnectionFactory(
                 sessionConnectionFactory(opt),
                 openscp::uploadsUsePartialFile(opt.protocol,
@@ -1596,7 +1587,7 @@ void MainWindow::applyRemoteConnectedUI(const openscp::SessionOptions &opt) {
         return;
     }
 
-    rightView_->setModel(rightLocalModel_);
+    setPanelModel(rightView_, rightLocalModel_);
     rightPath_->setPath(QStringLiteral("/"));
     rightIsRemote_ = true;
     sessionController_->setOptions(opt);
@@ -1607,6 +1598,7 @@ void MainWindow::applyRemoteConnectedUI(const openscp::SessionOptions &opt) {
     rightRemoteMutationsSupported_ = false;
     if (transferMgr_) {
         transferMgr_->setSessionIdentity(remoteNavigationScope());
+        transferMgr_->setDownloadOrigin(openscpui::downloadOriginUrl(opt));
         transferMgr_->setConnectionFactory(
             sessionConnectionFactory(opt),
             openscp::uploadsUsePartialFile(opt.protocol,

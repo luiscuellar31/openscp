@@ -22,7 +22,8 @@ void TransferUiController::initialize(const QVector<TransferTask> &snapshot) {
 
 TransferUiUpdate TransferUiController::observe(
     const QVector<TransferTask> &upserts, const QVector<quint64> &removedIds,
-    bool remotePanelActive, const QString &remoteRoot) {
+    bool remotePanelActive, const QString &remoteRoot,
+    const std::function<bool(const QString &name)> &isListed) {
     TransferUiUpdate update;
     for (const quint64 taskId : removedIds) {
         completedUploadIds_.remove(taskId);
@@ -30,21 +31,17 @@ TransferUiUpdate TransferUiController::observe(
         downloadsToOpen_.remove(taskId);
     }
 
-    bool newUploadInCurrentRoot = false;
     int newlyCompleted = 0;
     QString firstCompletionMessage;
 
     for (const TransferTask &task : upserts) {
-        auto pendingOpen = downloadsToOpen_.find(task.taskId);
-        if (pendingOpen != downloadsToOpen_.end() &&
+        if (downloadsToOpen_.contains(task.taskId) &&
             isTerminalTransferStatus(task.status)) {
             if (task.status == TransferTask::Status::Done &&
-                !update.completedDownloadPathsToOpen.contains(
-                    pendingOpen.value())) {
-                update.completedDownloadPathsToOpen.push_back(
-                    pendingOpen.value());
+                !update.completedDownloadPathsToOpen.contains(task.dst)) {
+                update.completedDownloadPathsToOpen.push_back(task.dst);
             }
-            downloadsToOpen_.erase(pendingOpen);
+            downloadsToOpen_.remove(task.taskId);
         }
 
         if (task.status != TransferTask::Status::Done)
@@ -53,9 +50,16 @@ TransferUiUpdate TransferUiController::observe(
         if (task.type == TransferTask::Type::Upload &&
             !completedUploadIds_.contains(task.taskId)) {
             completedUploadIds_.insert(task.taskId);
-            if (remotePanelActive &&
-                pathIsInsideRemoteRoot(task.dst, remoteRoot)) {
-                newUploadInCurrentRoot = true;
+            const QString below =
+                remotePanelActive ? pathBelowRemoteRoot(task.dst, remoteRoot)
+                                  : QString();
+            const qsizetype slash = below.indexOf(QLatin1Char('/'));
+            if (!below.isEmpty() && slash < 0) {
+                update.uploadsInRemoteRoot.push_back(
+                    ::normalizeRemotePath(task.dst));
+            } else if (slash > 0 &&
+                       (!isListed || !isListed(below.left(slash)))) {
+                update.scheduleRemoteRefresh = true;
             }
         }
 
@@ -80,7 +84,6 @@ TransferUiUpdate TransferUiController::observe(
                          .arg(name);
     }
 
-    update.scheduleRemoteRefresh = newUploadInCurrentRoot;
     if (newlyCompleted == 1) {
         update.completionMessage = firstCompletionMessage;
     } else if (newlyCompleted > 1) {
@@ -91,11 +94,9 @@ TransferUiUpdate TransferUiController::observe(
     return update;
 }
 
-void TransferUiController::openDownloadWhenCompleted(quint64 taskId,
-                                                     const QString &localPath) {
-    if (taskId == 0 || localPath.isEmpty())
-        return;
-    downloadsToOpen_.insert(taskId, localPath);
+void TransferUiController::openDownloadWhenCompleted(quint64 taskId) {
+    if (taskId != 0)
+        downloadsToOpen_.insert(taskId);
 }
 
 void TransferUiController::reset() {
@@ -104,14 +105,15 @@ void TransferUiController::reset() {
     downloadsToOpen_.clear();
 }
 
-bool TransferUiController::pathIsInsideRemoteRoot(const QString &candidatePath,
+QString TransferUiController::pathBelowRemoteRoot(const QString &candidatePath,
                                                   const QString &rootPath) {
     const QString candidate = ::normalizeRemotePath(candidatePath);
     const QString root = ::normalizeRemotePath(rootPath);
-    if (root == QStringLiteral("/"))
-        return candidate.startsWith(QLatin1Char('/'));
-    return candidate == root ||
-           candidate.startsWith(root + QStringLiteral("/"));
+    const QString prefix =
+        root == QStringLiteral("/") ? root : root + QStringLiteral("/");
+    if (!candidate.startsWith(prefix))
+        return {};
+    return candidate.mid(prefix.size());
 }
 
 } // namespace openscpui

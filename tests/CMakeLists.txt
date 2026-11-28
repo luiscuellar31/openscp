@@ -34,6 +34,12 @@ function(openscp_add_test TARGET_NAME)
     # A hung test fails after ten minutes instead of CTest's default 25,
     # which sanitizer runs still stay well within. Tests may set their own.
     set_tests_properties(${TARGET_NAME} PROPERTIES TIMEOUT 600)
+    if(WIN32)
+        # Windows finds the DLLs of a Qt installation only through PATH.
+        set_tests_properties(${TARGET_NAME} PROPERTIES
+            ENVIRONMENT_MODIFICATION
+                "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
+    endif()
     if(TEST_LABELS)
         set_tests_properties(${TARGET_NAME} PROPERTIES LABELS "${TEST_LABELS}")
     else()
@@ -66,6 +72,21 @@ openscp_add_test(openscp_core_tests
     INCLUDE_DIRECTORIES ${CMAKE_SOURCE_DIR}/core/src
     LINK_LIBRARIES openscp_core
 )
+if(WIN32)
+    # CommandLineToArgvW reads back the jump tunnel's command line.
+    target_link_libraries(openscp_core_tests PRIVATE Shell32)
+endif()
+
+get_target_property(OPENSCP_CORE_HAS_CURL_FTP
+    openscp_core OPENSCP_HAS_CURL_FTP)
+get_target_property(OPENSCP_CORE_HAS_CURL_WEBDAV
+    openscp_core OPENSCP_HAS_CURL_WEBDAV)
+if(OPENSCP_CORE_HAS_CURL_FTP OR OPENSCP_CORE_HAS_CURL_WEBDAV)
+    # Tests that include the curl backends' headers or call curl need its
+    # include paths and, for a static curl as on Windows, its definitions.
+    find_package(CURL REQUIRED)
+    target_link_libraries(openscp_core_tests PRIVATE CURL::libcurl)
+endif()
 
 foreach(TEST_COMPONENT IN ITEMS
         transfer_manager
@@ -84,13 +105,28 @@ foreach(TEST_COMPONENT IN ITEMS
         sync_coordinator
         local_tree_discovery
         update
-        remote_tree_walker)
+        remote_tree_walker
+        single_instance)
     openscp_add_test(openscp_${TEST_COMPONENT}_tests
         SOURCES ${TEST_COMPONENT}_tests.cpp
         LINK_LIBRARIES openscp_ui_logic
     )
 endforeach()
 target_link_libraries(openscp_update_tests PRIVATE OpenSSL::Crypto)
+
+if(WIN32)
+    # Stands in for ssh.exe, sftp.exe and the update setup in the tests that
+    # check how OpenSCP starts them, and for the ssh.exe of a jump tunnel.
+    add_executable(openscp_argv_probe argv_probe.cpp)
+    foreach(PROBE_USER IN ITEMS
+            openscp_core_tests
+            openscp_terminal_command_builder_tests
+            openscp_update_tests)
+        add_dependencies(${PROBE_USER} openscp_argv_probe)
+        target_compile_definitions(${PROBE_USER} PRIVATE
+            "OPENSCP_ARGV_PROBE=\"$<TARGET_FILE:openscp_argv_probe>\"")
+    endforeach()
+endif()
 
 # These tests intentionally exercise the test-only mock implementation.
 target_include_directories(openscp_transfer_manager_tests PRIVATE
@@ -108,6 +144,22 @@ openscp_add_test(openscp_platform_path_actions_tests
 openscp_add_test(openscp_ui_utilities_tests
     SOURCES ui_utilities_tests.cpp
     LINK_LIBRARIES openscp_ui_logic
+)
+# The catalogs, so that a test can check what each language shows.
+qt_add_translation(OPENSCP_TEST_QM_FILES
+    ${CMAKE_SOURCE_DIR}/translations/openscp_de.ts
+    ${CMAKE_SOURCE_DIR}/translations/openscp_en.ts
+    ${CMAKE_SOURCE_DIR}/translations/openscp_es.ts
+    ${CMAKE_SOURCE_DIR}/translations/openscp_fr.ts
+    ${CMAKE_SOURCE_DIR}/translations/openscp_pt.ts
+)
+foreach(qm ${OPENSCP_TEST_QM_FILES})
+    get_filename_component(_qm_name "${qm}" NAME)
+    set_source_files_properties(${qm} PROPERTIES QT_RESOURCE_ALIAS "${_qm_name}")
+endforeach()
+qt_add_resources(openscp_ui_utilities_tests test_i18n
+    PREFIX "/i18n"
+    FILES ${OPENSCP_TEST_QM_FILES}
 )
 
 # Only demo builds compile the sample data into the application.
@@ -150,8 +202,18 @@ openscp_add_test(openscp_main_window_navigation_tests
     SOURCES main_window_navigation_tests.cpp
     LINK_LIBRARIES openscp_main_window
 )
+target_include_directories(openscp_main_window_navigation_tests PRIVATE
+    ${CMAKE_SOURCE_DIR}/core/src)
 set_tests_properties(openscp_main_window_navigation_tests PROPERTIES TIMEOUT 60)
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+if(CMAKE_SYSTEM_NAME MATCHES "^(Linux|Windows)$")
+    set(OPENSCP_OFFSCREEN_ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+    if(WIN32)
+        # On Windows the offscreen platform reads fonts from a folder, not
+        # from the system, and lays text out with no width without them.
+        file(TO_CMAKE_PATH "$ENV{WINDIR}/Fonts" OPENSCP_WINDOWS_FONT_DIR)
+        list(APPEND OPENSCP_OFFSCREEN_ENVIRONMENT
+            "QT_QPA_FONTDIR=${OPENSCP_WINDOWS_FONT_DIR}")
+    endif()
     set_tests_properties(
         openscp_app_icon_tests
         openscp_site_manager_dialog_tests
@@ -162,7 +224,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         openscp_sync_dialog_tests
         openscp_main_window_navigation_tests
         PROPERTIES
-        ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+        ENVIRONMENT "${OPENSCP_OFFSCREEN_ENVIRONMENT}")
 endif()
 
 openscp_add_test(openscp_sync_comparison_tests
@@ -193,8 +255,6 @@ openscp_add_test(openscp_scp_integration_tests
     SKIP_RETURN_CODE 77
 )
 
-get_target_property(OPENSCP_CORE_HAS_CURL_FTP
-    openscp_core OPENSCP_HAS_CURL_FTP)
 if(OPENSCP_CORE_HAS_CURL_FTP)
     openscp_add_test(openscp_ftp_integration_tests
         CUSTOM_MAIN
@@ -221,8 +281,6 @@ else()
         "${CMAKE_CURRENT_SOURCE_DIR}/curl_ftps_integration_tests.cpp")
 endif()
 
-get_target_property(OPENSCP_CORE_HAS_CURL_WEBDAV
-    openscp_core OPENSCP_HAS_CURL_WEBDAV)
 if(OPENSCP_CORE_HAS_CURL_FTP OR OPENSCP_CORE_HAS_CURL_WEBDAV)
     openscp_add_test(openscp_curl_backend_common_tests
         SOURCES curl_backend_common_tests.cpp
@@ -232,7 +290,7 @@ if(OPENSCP_CORE_HAS_CURL_FTP OR OPENSCP_CORE_HAS_CURL_WEBDAV)
     # The TLS key probe tests run a loopback TLS server.
     find_package(OpenSSL REQUIRED COMPONENTS SSL Crypto)
     target_link_libraries(openscp_curl_backend_common_tests
-        PRIVATE OpenSSL::SSL OpenSSL::Crypto)
+        PRIVATE CURL::libcurl OpenSSL::SSL OpenSSL::Crypto)
     openscp_add_test(openscp_curl_listing_parser_tests
         SOURCES curl_listing_parser_tests.cpp
         INCLUDE_DIRECTORIES ${CMAKE_SOURCE_DIR}/core/src

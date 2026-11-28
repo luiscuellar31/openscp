@@ -17,6 +17,14 @@ namespace {
 
 constexpr int kMaximumRecentEntries = 20;
 
+// Windows and macOS volumes usually ignore case in names; Linux ones do not,
+// so there ~/Docs and ~/docs are two favorites.
+#if defined(Q_OS_WIN) || defined(Q_OS_MACOS)
+constexpr Qt::CaseSensitivity kLocalPathCase = Qt::CaseInsensitive;
+#else
+constexpr Qt::CaseSensitivity kLocalPathCase = Qt::CaseSensitive;
+#endif
+
 } // namespace
 
 namespace {
@@ -84,8 +92,8 @@ NavigationStore::encodeRecentServer(const openscp::SessionOptions &session) {
                 openscp::normalizeWebDavScheme(session.webdav_scheme))));
         query.addQueryItem(
             QStringLiteral("webdavBasePath"),
-            QString::fromStdString(
-                openscp::normalizeWebDavBasePath(session.webdav_base_path)));
+            QString::fromStdString(openscp::webDavBasePathToText(
+                openscp::normalizeWebDavBasePath(session.webdav_base_path))));
     }
     return query.toString(QUrl::FullyEncoded);
 }
@@ -166,7 +174,7 @@ bool NavigationStore::decodeRecentServer(const QString &encoded,
                 decoded.webdav_verify_peer = false;
                 decoded.webdav_ca_cert_path.reset();
             }
-            decoded.webdav_base_path = openscp::normalizeWebDavBasePath(
+            decoded.webdav_base_path = openscp::webDavBasePathFromText(
                 query.queryItemValue(QStringLiteral("webdavBasePath"))
                     .trimmed()
                     .toStdString());
@@ -199,6 +207,7 @@ void NavigationStore::addRecentLocalPath(const QString &path) {
         settings->value(settingskeys::kRecentLocalPaths).toStringList();
     prependRecent(values, normalized);
     settings->setValue(settingskeys::kRecentLocalPaths, values);
+    finishSave(*settings);
 }
 
 void NavigationStore::addRecentRemotePath(const QString &scope,
@@ -211,6 +220,7 @@ void NavigationStore::addRecentRemotePath(const QString &scope,
     QStringList values = settings->value(key).toStringList();
     prependRecent(values, normalized);
     settings->setValue(key, values);
+    finishSave(*settings);
 }
 
 void NavigationStore::addRecentServer(const openscp::SessionOptions &session) {
@@ -222,6 +232,7 @@ void NavigationStore::addRecentServer(const openscp::SessionOptions &session) {
         settings->value(settingskeys::kRecentServers).toStringList();
     prependRecent(values, encoded);
     settings->setValue(settingskeys::kRecentServers, values);
+    finishSave(*settings);
 }
 
 QStringList NavigationStore::recentLocalPaths() const {
@@ -247,6 +258,10 @@ QStringList NavigationStore::favorites(Location location,
                          : createSettings()->value(key).toStringList();
 }
 
+Qt::CaseSensitivity NavigationStore::pathCaseSensitivity(Location location) {
+    return location == Location::Local ? kLocalPathCase : Qt::CaseSensitive;
+}
+
 bool NavigationStore::isFavorite(Location location, const QString &path,
                                  const QString &remoteScope) const {
     const QString normalized = location == Location::Local
@@ -254,8 +269,7 @@ bool NavigationStore::isFavorite(Location location, const QString &path,
                                    : normalizeRemotePath(path);
     if (normalized.isEmpty())
         return false;
-    const Qt::CaseSensitivity sensitivity =
-        location == Location::Local ? Qt::CaseInsensitive : Qt::CaseSensitive;
+    const Qt::CaseSensitivity sensitivity = pathCaseSensitivity(location);
     const QStringList values = favorites(location, remoteScope);
     return std::any_of(values.cbegin(), values.cend(),
                        [&](const QString &value) {
@@ -274,8 +288,7 @@ bool NavigationStore::toggleFavorite(Location location, const QString &path,
 
     auto settings = createSettings();
     QStringList values = settings->value(key).toStringList();
-    const Qt::CaseSensitivity sensitivity =
-        location == Location::Local ? Qt::CaseInsensitive : Qt::CaseSensitive;
+    const Qt::CaseSensitivity sensitivity = pathCaseSensitivity(location);
     bool removed = false;
     values.removeIf([&](const QString &value) {
         const bool matches = value.compare(normalized, sensitivity) == 0;
@@ -285,14 +298,18 @@ bool NavigationStore::toggleFavorite(Location location, const QString &path,
     if (!removed)
         values.prepend(normalized);
     settings->setValue(key, values);
+    finishSave(*settings);
     return !removed;
 }
 
 void NavigationStore::clearFavorites(Location location,
                                      const QString &remoteScope) {
     const QString key = favoritesKey(location, remoteScope);
-    if (!key.isEmpty())
-        createSettings()->remove(key);
+    if (key.isEmpty())
+        return;
+    auto settings = createSettings();
+    settings->remove(key);
+    finishSave(*settings);
 }
 
 void NavigationStore::clearAllHistory() {
@@ -301,9 +318,27 @@ void NavigationStore::clearAllHistory() {
     settings->remove(
         QString::fromLatin1(openscpui::settingskeys::kRemoteScopes));
     settings->remove(settingskeys::kRecentServers);
+    finishSave(*settings);
 }
 
-std::unique_ptr<QSettings> NavigationStore::createSettings() const {
+void NavigationStore::setSaveFailureHandler(
+    std::function<void(const QString &)> handler) {
+    onSaveFailure_ = std::move(handler);
+}
+
+void NavigationStore::finishSave(AppSettings &settings) {
+    const SettingsSyncResult result = settings.syncSecure();
+    if (result.ok) {
+        saveFailureReported_ = false;
+        return;
+    }
+    if (saveFailureReported_ || !onSaveFailure_)
+        return;
+    saveFailureReported_ = true;
+    onSaveFailure_(result.error);
+}
+
+std::unique_ptr<AppSettings> NavigationStore::createSettings() const {
     if (!settingsFile_.isEmpty()) {
         return std::make_unique<AppSettings>(settingsFile_, settingsFormat_);
     }

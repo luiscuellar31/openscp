@@ -1,10 +1,12 @@
 // Internal RemoteClient implementation using libssh2 for SSH/SFTP.
 // Encapsulates the SSH session, SFTP channel, and TCP socket.
 #pragma once
+#include "libssh2/detail/PlatformSocket.hpp"
 #include "openscp/KnownHostsUtils.hpp"
 #include "openscp/RemoteClient.hpp"
 
 #include <atomic>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -15,6 +17,12 @@ struct _LIBSSH2_SFTP;
 struct _LIBSSH2_SFTP_HANDLE;
 
 namespace openscp {
+
+#ifdef _WIN32
+namespace libssh2detail {
+class SshJumpTunnel;
+}
+#endif
 
 class Libssh2SftpClient : public RemoteClient {
     public:
@@ -84,8 +92,8 @@ class Libssh2SftpClient : public RemoteClient {
     // Exposed for protocol adapters that share the authenticated SSH transport
     // (for example, SCP channel operations).
     _LIBSSH2_SESSION *sessionHandle() const { return session_; }
-    [[nodiscard]] std::unique_lock<std::recursive_mutex> lockIo() {
-        return std::unique_lock<std::recursive_mutex>(ioMutex_);
+    [[nodiscard]] std::unique_lock<std::recursive_timed_mutex> lockIo() {
+        return std::unique_lock<std::recursive_timed_mutex>(ioMutex_);
     }
 
     private:
@@ -103,7 +111,24 @@ class Libssh2SftpClient : public RemoteClient {
         Libssh2SftpClient &owner_;
         std::string &error_;
         bool mutation_ = false;
-        std::unique_lock<std::recursive_mutex> ioLock_;
+        std::unique_lock<std::recursive_timed_mutex> ioLock_;
+    };
+
+    // Once engaged, holds off interrupt() until it ends, and then carries out
+    // an interrupt that came meanwhile. A replacement engages it before it
+    // moves the old destination aside, so that a pause cannot leave nothing
+    // in its place.
+    class InterruptHold {
+        public:
+        explicit InterruptHold(Libssh2SftpClient &owner) : owner_(owner) {}
+        ~InterruptHold();
+        InterruptHold(const InterruptHold &) = delete;
+        InterruptHold &operator=(const InterruptHold &) = delete;
+        void engage();
+
+        private:
+        Libssh2SftpClient &owner_;
+        bool engaged_ = false;
     };
 
     StructuredErrorScope beginStructuredOperation(std::string &err,
@@ -114,7 +139,7 @@ class Libssh2SftpClient : public RemoteClient {
 
     // Atomic because interrupt() clears it from another thread.
     std::atomic_bool connected_{false};
-    int sock_ = -1;
+    libssh2detail::SocketHandle sock_ = libssh2detail::kInvalidSocket;
     _LIBSSH2_SESSION *session_ = nullptr; // <- uses internal libssh2 types
     _LIBSSH2_SFTP *sftp_ = nullptr;       // <- same
     TransferIntegrityPolicy transferIntegrityPolicy_ =
@@ -122,21 +147,29 @@ class Libssh2SftpClient : public RemoteClient {
     LocalFileDurability localFileDurability_ =
         LocalFileDurability::FileAndDirectory;
     mutable std::mutex stateMutex_;
-    mutable std::recursive_mutex ioMutex_;
-#ifndef _WIN32
+    // Guarded by stateMutex_; see InterruptHold.
+    bool interruptsHeld_ = false;
+    bool interruptDeferred_ = false;
+    // Timed, so that disconnect() can wait for it between cancellations.
+    mutable std::recursive_timed_mutex ioMutex_;
+#ifdef _WIN32
+    std::unique_ptr<libssh2detail::SshJumpTunnel> jumpTunnel_;
+#else
     int jumpProxyPid_ = -1;
     int jumpProxyStderrFd_ = -1;
 #endif
 
     // TCP connection + SSH handshake and authentication.
     bool tcpConnect(const SessionOptions &opt, std::string &err);
+    // Opens a new connection to the proxy in place of the current one.
+    bool reconnectToProxy(const SessionOptions &opt,
+                          libssh2detail::SocketHandle &socketFd,
+                          std::string &err);
     bool sshHandshakeAuth(const SessionOptions &opt, std::string &err,
                           bool initializeSftpSubsystem);
     bool connectInternal(const SessionOptions &opt, std::string &err,
                          bool initializeSftpSubsystem);
-#ifndef _WIN32
     bool describeJumpTunnelFailure(std::string &err);
-#endif
 };
 
 } // namespace openscp

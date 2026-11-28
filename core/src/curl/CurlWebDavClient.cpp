@@ -15,6 +15,7 @@
 #include <cstring>
 #include <ctime>
 #include <limits>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <sstream>
@@ -211,9 +212,15 @@ bool performTextRequestOnce(CURL *curl, const SessionOptions &opt,
 
     const std::string url =
         buildWebDavUrl(opt, request.remotePath, request.collection);
-    struct curl_slist *headerList = nullptr;
-    for (const std::string &h : request.headers)
-        headerList = curl_slist_append(headerList, h.c_str());
+    // A PROPFIND that lost its Depth header would ask for the whole tree.
+    curlcommon::CurlSlist headerList(nullptr, &curl_slist_free_all);
+    for (const std::string &header : request.headers) {
+        if (!curlcommon::appendToCurlSlist(headerList, header)) {
+            err = std::string("Could not configure WebDAV ") + request.method +
+                  " request headers.";
+            return false;
+        }
+    }
 
     curlcommon::TransferProgressContext cancelContext{
         {},
@@ -229,7 +236,8 @@ bool performTextRequestOnce(CURL *curl, const SessionOptions &opt,
                           curlcommon::appendStringCallback) == CURLE_OK) &&
         (curl_easy_setopt(curl, CURLOPT_WRITEDATA, &responseSink) ==
          CURLE_OK) &&
-        (curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headerList) == CURLE_OK) &&
+        (curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headerList.get()) ==
+         CURLE_OK) &&
         (curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, captureWebDavHeader) ==
          CURLE_OK) &&
         (curl_easy_setopt(curl, CURLOPT_HEADERDATA,
@@ -242,7 +250,6 @@ bool performTextRequestOnce(CURL *curl, const SessionOptions &opt,
     if (!configured) {
         err = std::string("Could not configure WebDAV ") + request.method +
               " request.";
-        curl_slist_free_all(headerList);
         return false;
     }
 
@@ -254,19 +261,16 @@ bool performTextRequestOnce(CURL *curl, const SessionOptions &opt,
                 CURLE_OK) {
             err = std::string("Could not configure WebDAV request body for ") +
                   request.method + ".";
-            curl_slist_free_all(headerList);
             return false;
         }
     }
 
     if (curlcommon::rejectInterrupted(interrupted, err, curlCodeOut)) {
-        curl_slist_free_all(headerList);
         return false;
     }
     std::string detail;
     CURLcode rc = curlcommon::performWithErrorDetail(curl, detail);
     (void)curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &response.statusCode);
-    curl_slist_free_all(headerList);
 
     const bool refused = curlcommon::refusedResponse(
         responseSink, std::string("WebDAV ") + request.method + " response", rc,
@@ -580,6 +584,10 @@ void CurlWebDavClient::interrupt() {
     state_->requestInterrupt();
 }
 
+void CurlWebDavClient::clearInterrupt() {
+    state_->clearInterrupt();
+}
+
 bool CurlWebDavClient::isConnected() const {
     return state_->isConnected();
 }
@@ -692,6 +700,10 @@ bool CurlWebDavClient::get(
 
     std::optional<std::uint32_t> retryAfter;
     const std::string url = buildWebDavUrl(opt, remote);
+    // IIS sends a script such as default.aspx as a file, instead of running
+    // it, only when asked this way, as Windows' own WebDAV client does.
+    const curlcommon::CurlSlist asFileHeader(
+        curl_slist_append(nullptr, "Translate: f"), &curl_slist_free_all);
     RemoteError failure;
     long rejectedStatus = 0;
     const auto download = [&] {
@@ -710,6 +722,14 @@ bool CurlWebDavClient::get(
                            CURLE_OK &&
                        curl_easy_setopt(curl, CURLOPT_HTTPGET, 1L) ==
                            CURLE_OK &&
+                       // A file arrives byte for byte, even a .gz that the
+                       // server marks with Content-Encoding.
+                       curl_easy_setopt(curl, CURLOPT_ACCEPT_ENCODING,
+                                        static_cast<char *>(nullptr)) ==
+                           CURLE_OK &&
+                       asFileHeader &&
+                       curl_easy_setopt(curl, CURLOPT_HTTPHEADER,
+                                        asFileHeader.get()) == CURLE_OK &&
                        // The time comes from Last-Modified.
                        curl_easy_setopt(curl, CURLOPT_FILETIME, 1L) ==
                            CURLE_OK &&
@@ -773,7 +793,8 @@ bool CurlWebDavClient::put(
     const auto &connection = operation.connection();
     const SessionOptions &opt = *connection.options;
 
-    const std::string remotePartial = normalizeRemotePath(remote) + ".part";
+    const std::string remotePartial =
+        partialPathFor(normalizeRemotePath(remote));
     curlcommon::ActiveDestinationLease destinationLease(
         webDavDestinationKey(opt, remote));
     curlcommon::ActiveDestinationLease partialLease(

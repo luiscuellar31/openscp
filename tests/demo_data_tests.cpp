@@ -11,10 +11,11 @@
 
 namespace {
 
-// NavigationStore() keeps history in the platform's native store for the
-// application's name, apart from the isolated settings the sites use.
+// NavigationStore() keeps history in a store named after the application,
+// in the default format that IsolatedSettings redirects.
 QSettings &historyStore() {
-    static QSettings store(QCoreApplication::organizationName(),
+    static QSettings store(QSettings::defaultFormat(), QSettings::UserScope,
+                           QCoreApplication::organizationName(),
                            QCoreApplication::applicationName());
     return store;
 }
@@ -76,7 +77,7 @@ int main(int argc, char **argv) {
         return 1;
     }
     openscp::test::TestHarness harness("demo data");
-    const int result = harness.run();
+    const int result = harness.run(argc, argv);
     clearAll();
     return result;
 }

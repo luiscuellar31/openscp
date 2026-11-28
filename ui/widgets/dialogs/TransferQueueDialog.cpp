@@ -30,6 +30,7 @@
 #include <QSortFilterProxyModel>
 #include <QSpinBox>
 #include <QTableView>
+#include <QTextDocument>
 #include <QTimer>
 #include <QToolButton>
 #include <QVBoxLayout>
@@ -188,14 +189,17 @@ void withSelectedTasks(TransferManager *manager, const QVector<quint64> &ids,
     forEachSelectedTask(ids, taskIndex, callback);
 }
 
-SelectedActionsState buildSelectedActionsState(const QVector<quint64> &ids,
-                                               const TaskIndexById &taskIndex) {
+// taskFor finds a selected task, or returns null for one that is gone.
+SelectedActionsState buildSelectedActionsState(
+    const QVector<quint64> &ids,
+    const std::function<const TransferTask *(quint64)> &taskFor) {
     SelectedActionsState out;
     out.hasSelection = !ids.isEmpty();
-    if (!out.hasSelection)
-        return out;
-
-    forEachSelectedTask(ids, taskIndex, [&](quint64, const TransferTask &task) {
+    for (quint64 taskId : ids) {
+        const TransferTask *found = taskFor(taskId);
+        if (!found)
+            continue;
+        const TransferTask &task = *found;
         out.canPause = out.canPause || canPauseStatus(task.status);
         out.canResume = out.canResume || canResumeStatus(task.status);
         out.canLimit = out.canLimit || canActOnStatus(task.status);
@@ -207,9 +211,25 @@ SelectedActionsState buildSelectedActionsState(const QVector<quint64> &ids,
             task.type == TransferTask::Type::CreateLocalDirectory;
         out.canRemovePartialData =
             out.canRemovePartialData || mayHavePartialData(task);
-    });
+    }
     return out;
 }
+
+// The columns that fit their content are measured again after each change of
+// a row, several times a second while transfers run. Hidden, Qt would measure
+// every row each time, so those columns keep their widths until the window is
+// shown.
+class TransferTaskTableView final : public QTableView {
+    public:
+    using QTableView::QTableView;
+
+    protected:
+    int sizeHintForColumn(int column) const override {
+        if (!isVisible())
+            return columnWidth(column);
+        return QTableView::sizeHintForColumn(column);
+    }
+};
 
 } // namespace
 
@@ -325,14 +345,19 @@ class TransferTaskTableModel final : public QAbstractTableModel {
         }
 
         if (role == Qt::ToolTipRole) {
+            // Names and errors come from the server: a tooltip would read
+            // one such as <img width=4000 height=4000> as markup.
+            const auto asText = [](const QString &text) {
+                return Qt::convertFromPlainText(text, Qt::WhiteSpacePre);
+            };
             if (index.column() == ColSource)
-                return task.src;
+                return asText(task.src);
             if (index.column() == ColDestination)
-                return task.dst;
+                return asText(task.dst);
             if (index.column() == ColError && !task.error.isEmpty())
-                return task.error;
+                return asText(task.error);
             if (index.column() == ColName)
-                return displayNameForTask(task);
+                return asText(displayNameForTask(task));
         }
 
         if (role != Qt::DisplayRole)
@@ -526,6 +551,11 @@ class TransferTaskTableModel final : public QAbstractTableModel {
     }
 
     const QVector<TransferTask> &tasks() const { return tasks_; }
+
+    const TransferTask *taskById(quint64 taskId) const {
+        const auto found = rowById_.constFind(taskId);
+        return found == rowById_.cend() ? nullptr : &tasks_[found.value()];
+    }
 
     private:
     static bool differs(const TransferTask &prev, const TransferTask &next) {
@@ -726,7 +756,7 @@ TransferQueueDialog::TransferQueueDialog(TransferManager *mgr, QWidget *parent)
     proxy_ = new TransferTaskFilterProxyModel(this);
     proxy_->setSourceModel(model_);
 
-    table_ = new QTableView(this);
+    table_ = new TransferTaskTableView(this);
     table_->setObjectName(QStringLiteral("transferQueueTable"));
     table_->setAccessibleName(tr("Transfers"));
     table_->setAccessibleDescription(
@@ -973,7 +1003,13 @@ TransferQueueDialog::TransferQueueDialog(TransferManager *mgr, QWidget *parent)
     connect(mgr_, &TransferManager::queueSettingsChanged, this,
             &TransferQueueDialog::onQueueSettingsChanged);
     connect(table_->selectionModel(), &QItemSelectionModel::selectionChanged,
-            this, &TransferQueueDialog::updateSummary);
+            this, [this] {
+                summarySelectionStale_ = true;
+                updateSummary();
+            });
+    // Rows that leave the table may leave the selection without a signal.
+    connect(proxy_, &QAbstractItemModel::rowsAboutToBeRemoved, this,
+            [this] { summarySelectionStale_ = true; });
     connect(table_, &QTableView::customContextMenuRequested, this,
             &TransferQueueDialog::showContextMenu);
     connect(this, &QDialog::finished, this, [this] { saveUiState(); });
@@ -1160,6 +1196,7 @@ void TransferQueueDialog::refresh() {
     // Refresh always works from manager snapshot to avoid stale view state.
     const auto snapshot = mgr_->tasksSnapshot();
     model_->sync(snapshot);
+    summarySelectionStale_ = true;
     updateSummary();
 }
 
@@ -1181,6 +1218,7 @@ void TransferQueueDialog::onTasksRemoved(const QVector<quint64> &taskIds) {
     if (!model_)
         return;
     model_->removeTaskIds(taskIds);
+    summarySelectionStale_ = true;
     scheduleSummaryUpdate();
 }
 
@@ -1243,8 +1281,8 @@ void TransferQueueDialog::onLimitSelected() {
 
     bool inputAccepted = false;
     const int speedLimitKbps = QInputDialog::getInt(
-        this, tr("Limit for task(s)"), tr("KB/s (0 = no limit)"), 0, 0,
-        1'000'000, 1, &inputAccepted);
+        this, tr("Limit for %n tasks", nullptr, pluralCount(eligible.size())),
+        tr("KB/s (0 = no limit)"), 0, 0, 1'000'000, 1, &inputAccepted);
     if (!inputAccepted)
         return;
     for (quint64 taskId : eligible)
@@ -1270,6 +1308,8 @@ void TransferQueueDialog::onFilterChanged(int filterId) {
     proxy_->setFilterMode(filterId);
     if (table_)
         table_->clearSelection();
+    // Hiding every selected row empties the selection without a signal.
+    summarySelectionStale_ = true;
     updateSummary();
     saveUiState();
 }
@@ -1432,11 +1472,17 @@ void TransferQueueDialog::updateSummary() {
     const bool canClearDone = (done + skipped) > 0;
     const bool canClearFailed = (error + warning + canceled) > 0;
     const bool canCancelAll = active > 0;
-    const QVector<quint64> selectedIds = selectedTaskIds();
-    const QVector<TransferTask> selectedTasks =
-        mgr_->tasksSnapshot(selectedIds);
-    const auto selectedState = buildSelectedActionsState(
-        selectedIds, buildTaskIndexById(selectedTasks));
+    // This runs several times a second while transfers run: the selection is
+    // read again only once it changes, and its tasks come from the table's
+    // own copy, without the queue's lock.
+    if (summarySelectionStale_) {
+        summarySelection_ = selectedTaskIds();
+        summarySelectionStale_ = false;
+    }
+    const auto selectedState =
+        buildSelectedActionsState(summarySelection_, [this](quint64 taskId) {
+            return model_->taskById(taskId);
+        });
 
     if (pauseBtn_)
         pauseBtn_->setEnabled(hasAny && canPause);
@@ -1505,8 +1551,9 @@ void TransferQueueDialog::showContextMenu(const QPoint &pos) {
 
     const auto ids = selectedTaskIds();
     const auto snapshot = mgr_->tasksSnapshot(ids);
-    const auto selectedState =
-        buildSelectedActionsState(ids, buildTaskIndexById(snapshot));
+    const auto taskIndex = buildTaskIndexById(snapshot);
+    const auto selectedState = buildSelectedActionsState(
+        ids, [&taskIndex](quint64 taskId) { return taskIndex.value(taskId); });
 
     QMenu menu(this);
     QAction *actPauseSel = menu.addAction(tr("Pause selected"));
@@ -1578,6 +1625,10 @@ void TransferQueueDialog::loadUiState() {
                 .toByteArray();
         if (!header.isEmpty())
             table_->horizontalHeader()->restoreState(header);
+        // Fitting only the rows on screen keeps each change of a row cheap
+        // with a long history. The saved state also restores this setting,
+        // which earlier versions left at Qt's 1000 rows.
+        table_->horizontalHeader()->setResizeContentsPrecision(0);
         table_->horizontalHeader()->setSectionResizeMode(
             TransferTaskTableModel::ColProgress, QHeaderView::Fixed);
         table_->setColumnWidth(TransferTaskTableModel::ColProgress,

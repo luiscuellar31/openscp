@@ -1,3 +1,4 @@
+#include "PlatformTestSupport.hpp"
 #include "TestHarness.hpp"
 #include "logic/common/AppSettings.hpp"
 #include "logic/common/MainWindowSharedUtils.hpp"
@@ -11,15 +12,21 @@
 #include <QDateTime>
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QSettings>
+#include <QStandardPaths>
 #include <QTemporaryDir>
+#include <QTranslator>
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <filesystem>
 #include <initializer_list>
 #include <string>
 #include <system_error>
+#include <thread>
+#include <utility>
 #include <vector>
 
 #ifndef _WIN32
@@ -92,6 +99,25 @@ OPENSCP_TEST(testPathDepthOrdering, test) {
         "deep ordering should break equal-depth ties descending");
 }
 
+OPENSCP_TEST(testLeftOutSummaryHasOneOrder, test) {
+    // A drag-out and a folder download each wrote this summary, in their own
+    // order and translation context.
+    test.check(leftOutSummary({}).isEmpty(),
+               "a scan that left nothing out should say nothing");
+    test.check(
+        leftOutSummary({.invalidNames = 2, .depthLimits = 1}) ==
+            QStringLiteral("Skipped invalid: 2  |  Depth limits reached: 1"),
+        "the counts that are zero should be left out");
+    test.check(leftOutSummary({.invalidNames = 1,
+                               .unlistedFolders = 3,
+                               .skippedLinks = 4,
+                               .depthLimits = 5}) ==
+                   QStringLiteral("Skipped invalid: 1  |  Folders not listed: "
+                                  "3  |  Symbolic links skipped: 4  |  Depth "
+                                  "limits reached: 5"),
+               "the counts should keep one order");
+}
+
 OPENSCP_TEST(testLocalRenameUsesTheFilesystemMove, test) {
     QTemporaryDir temporary;
     test.check(temporary.isValid(),
@@ -147,19 +173,24 @@ OPENSCP_TEST(testLocalRemoveKeepsLinkTargets, test) {
     data.close();
 
     const QString link = root.filePath(QStringLiteral("link"));
-    test.check(QFile::link(target, link),
+    test.check(openscp::testsupport::createLocalLink(target, link),
                "the local remove fixture should link to the folder");
-    test.check(removeLocalEntry(link) && !QFileInfo(link).isSymLink(),
+    test.check(removeLocalEntry(link) && !QFileInfo::exists(link) &&
+                   !QFileInfo(link).isSymLink(),
                "removing a folder link should remove the link itself");
     test.check(QFile::exists(targetFile) &&
                    QDir(root.filePath(QStringLiteral("target/sub"))).exists(),
                "removing a folder link should keep the linked folder intact");
 
     const QString dangling = root.filePath(QStringLiteral("dangling"));
-    test.check(QFile::link(root.filePath(QStringLiteral("missing")), dangling),
-               "the local remove fixture should create a dangling link");
-    test.check(removeLocalEntry(dangling) && !QFileInfo(dangling).isSymLink(),
-               "removing a dangling link should remove the link");
+    if (openscp::testsupport::createLocalLink(
+            root.filePath(QStringLiteral("missing")), dangling)) {
+        test.check(removeLocalEntry(dangling) &&
+                       !QFileInfo(dangling).isSymLink(),
+                   "removing a dangling link should remove the link");
+    } else {
+        test.skip("removing a dangling link needs symbolic links");
+    }
 
     test.check(removeLocalEntry(target) && !QFileInfo::exists(target),
                "removing a folder should remove its whole tree");
@@ -168,7 +199,7 @@ OPENSCP_TEST(testLocalRemoveKeepsLinkTargets, test) {
 }
 
 std::filesystem::path nativePath(const QString &path) {
-    return std::filesystem::path(QFile::encodeName(path).constData());
+    return openscp::testsupport::nativeTestPath(path);
 }
 
 bool writeLocalFile(const QString &path, const QByteArray &contents) {
@@ -213,12 +244,19 @@ OPENSCP_TEST(testLocalCopyKeepsHiddenEntriesAndLinks, test) {
             writeLocalFile(source + QStringLiteral("/.git/config"), "git") &&
             writeLocalFile(source + QStringLiteral("/sub/inner.txt"), "inner"),
         "the local copy fixture should write its files");
-    test.check(
+    const bool linked =
         createRelativeLink(source + QStringLiteral("/folder-link"), "sub") &&
-            createRelativeLink(source + QStringLiteral("/sub/file-link"),
-                               "inner.txt") &&
-            createRelativeLink(source + QStringLiteral("/dangling"), "missing"),
-        "the local copy fixture should create relative links");
+        createRelativeLink(source + QStringLiteral("/sub/file-link"),
+                           "inner.txt") &&
+        createRelativeLink(source + QStringLiteral("/dangling"), "missing");
+#ifdef Q_OS_WIN
+    // Only administrators, or Developer Mode, may make symbolic links.
+    if (!linked) {
+        test.skip("copying links needs symbolic links");
+        return;
+    }
+#endif
+    test.check(linked, "the local copy fixture should create relative links");
 
     QString error;
     test.check(copyLocalEntry(source, copy, error) && error.isEmpty(),
@@ -248,6 +286,50 @@ OPENSCP_TEST(testLocalCopyKeepsHiddenEntriesAndLinks, test) {
                    QFileInfo(linkCopy).isSymLink(),
                "copying a selected link should copy the link itself");
 }
+
+#ifdef Q_OS_WIN
+OPENSCP_TEST(testWindowsLocalCopyKeepsShortcutsAsFiles, test) {
+    // Qt's isDir() and isFile() describe the entry a shortcut leads to, but
+    // the shortcut is an ordinary file, which Explorer copies as it is.
+    QTemporaryDir temporary;
+    const QDir root(temporary.path());
+    const QString source = root.filePath(QStringLiteral("source"));
+    const QString target = root.filePath(QStringLiteral("target"));
+    test.check(
+        root.mkpath(QStringLiteral("source")) &&
+            root.mkpath(QStringLiteral("target")) &&
+            writeLocalFile(target + QStringLiteral("/inside.txt"), "inside") &&
+            QFile::link(target, source + QStringLiteral("/folder.lnk")) &&
+            QFile::link(target + QStringLiteral("/inside.txt"),
+                        source + QStringLiteral("/file.lnk")) &&
+            QFile::link(target + QStringLiteral("/missing.txt"),
+                        source + QStringLiteral("/broken.lnk")),
+        "the shortcut fixture should be created");
+
+    const QString copy = root.filePath(QStringLiteral("copy"));
+    QString error;
+    const bool copied = copyLocalEntry(source, copy, error);
+    test.check(copied, "a folder with shortcuts should be copied: " +
+                           error.toStdString());
+    for (const char *name : {"folder.lnk", "file.lnk", "broken.lnk"}) {
+        const QString shortcut = QStringLiteral("/") + QLatin1String(name);
+        test.check(QFileInfo(copy + shortcut).isShortcut() &&
+                       readLocalFile(copy + shortcut) ==
+                           readLocalFile(source + shortcut),
+                   std::string("a shortcut should be copied as itself: ") +
+                       name);
+    }
+
+    // Not a copy of the folder it leads to, so not one into itself either.
+    const QString back = target + QStringLiteral("/back.lnk");
+    error.clear();
+    const bool copiedBack =
+        copyLocalEntry(source + QStringLiteral("/folder.lnk"), back, error);
+    test.check(copiedBack && QFileInfo(back).isShortcut(),
+               "a folder shortcut should be copied into its own folder: " +
+                   error.toStdString());
+}
+#endif
 
 OPENSCP_TEST(testLocalCopyStopsWhenCanceled, test) {
     QTemporaryDir root;
@@ -343,13 +425,61 @@ OPENSCP_TEST(testStagingBatchNames, test) {
                "other folders in the staging root should be left alone");
 }
 
+OPENSCP_TEST(testStagingRootFollowsTheDownloadsFolder, test) {
+    const QString downloads =
+        QStandardPaths::writableLocation(QStandardPaths::DownloadLocation);
+    test.check(
+        downloads.isEmpty() ||
+            openscpui::defaultStagingRootPath() ==
+                QDir(downloads).filePath(QStringLiteral("OpenSCP-Dragged")),
+        "the default staging root should be in the Downloads folder");
+#ifdef Q_OS_LINUX
+    // XDG can name that folder in the user's language; releases before 1.3.0
+    // used ~/Downloads anyway.
+    QTemporaryDir config;
+    test.check(config.isValid(), "the XDG test needs a folder");
+    if (!config.isValid())
+        return;
+    QFile userDirs(
+        QDir(config.path()).filePath(QStringLiteral("user-dirs.dirs")));
+    test.check(userDirs.open(QIODevice::WriteOnly) &&
+                   userDirs.write("XDG_DOWNLOAD_DIR=\"$HOME/Descargas\"\n") > 0,
+               "the XDG folder names should be written");
+    userDirs.close();
+    const bool hadConfigHome = qEnvironmentVariableIsSet("XDG_CONFIG_HOME");
+    const QByteArray configHome = qgetenv("XDG_CONFIG_HOME");
+    qputenv("XDG_CONFIG_HOME", QFile::encodeName(config.path()));
+    const QDir home(QDir::homePath());
+    test.check(openscpui::defaultStagingRootPath() ==
+                   home.filePath(QStringLiteral("Descargas/OpenSCP-Dragged")),
+               "the default staging root should follow the XDG Downloads "
+               "folder");
+    QSettings unset(QDir(config.path()).filePath(QStringLiteral("unset.ini")),
+                    QSettings::IniFormat);
+    test.check(openscpui::stagingRootsForStartupCleanup(unset).contains(
+                   home.filePath(QStringLiteral("Downloads/OpenSCP-Dragged"))),
+               "the startup cleanup should still go through the previous "
+               "default root");
+    QSettings chosen(QDir(config.path()).filePath(QStringLiteral("chosen.ini")),
+                     QSettings::IniFormat);
+    chosen.setValue(openscpui::settingskeys::kStagingRoot, config.path());
+    test.check(openscpui::stagingRootsForStartupCleanup(chosen) ==
+                   QStringList{config.path()},
+               "a chosen staging root should be the only one cleaned");
+    if (hadConfigHome)
+        qputenv("XDG_CONFIG_HOME", configHome);
+    else
+        qunsetenv("XDG_CONFIG_HOME");
+#endif
+}
+
 OPENSCP_TEST(testStagingBatchRemovalTakesAnEmptyRoot, test) {
     QTemporaryDir directory;
     test.check(directory.isValid(), "the staging test needs a folder");
     if (!directory.isValid())
         return;
     const QString root =
-        QDir(directory.path()).filePath(QStringLiteral("staging"));
+        QDir(directory.path()).filePath(QStringLiteral("OpenSCP-Dragged"));
     const QString first = QDir(root).filePath(openscpui::newStagingBatchName());
     const QString second =
         QDir(root).filePath(QStringLiteral("20260101-120000"));
@@ -365,6 +495,15 @@ OPENSCP_TEST(testStagingBatchRemovalTakesAnEmptyRoot, test) {
     openscpui::removeStagingBatch(second);
     test.check(!QFileInfo::exists(root),
                "a root left empty should be removed with its last batch");
+
+    const QString chosen =
+        QDir(directory.path()).filePath(QStringLiteral("staging"));
+    const QString batch =
+        QDir(chosen).filePath(openscpui::newStagingBatchName());
+    test.check(QDir().mkpath(batch), "the chosen root's batch should exist");
+    openscpui::removeStagingBatch(batch);
+    test.check(!QFileInfo::exists(batch) && QFileInfo::exists(chosen),
+               "a staging root the user chose should stay when left empty");
 }
 
 OPENSCP_TEST(testExpiredStagingBatchesAreRemoved, test) {
@@ -373,7 +512,7 @@ OPENSCP_TEST(testExpiredStagingBatchesAreRemoved, test) {
     if (!directory.isValid())
         return;
     const QDir base(directory.path());
-    const QString root = base.filePath(QStringLiteral("staging"));
+    const QString root = base.filePath(QStringLiteral("OpenSCP-Dragged"));
     const QString oldBatch =
         QDir(root).filePath(QStringLiteral("20200101-120000"));
     const QString newBatch =
@@ -394,10 +533,9 @@ OPENSCP_TEST(testExpiredStagingBatchesAreRemoved, test) {
     };
     test.check(age(oldBatch) && age(other) && age(outside),
                "the old folders should be dated back");
-#ifndef _WIN32
     const QString link = QDir(root).filePath(QStringLiteral("20200101-130000"));
-    test.check(QFile::link(outside, link), "a batch-named link should exist");
-#endif
+    test.check(openscp::testsupport::createLocalLink(outside, link),
+               "a batch-named link should exist");
 
     const int removed = openscpui::removeStagingBatchesOlderThan(
         root, QDateTime::currentDateTimeUtc().addDays(-7));
@@ -405,6 +543,22 @@ OPENSCP_TEST(testExpiredStagingBatchesAreRemoved, test) {
                    QFileInfo::exists(newBatch) && QFileInfo::exists(other) &&
                    QFileInfo::exists(outside),
                "only batches older than the retention should be removed");
+
+    // In a folder the user chose, their own dated folders look like batches
+    // of releases before the random suffix.
+    const QString chosen = base.filePath(QStringLiteral("chosen"));
+    const QString ownFolder =
+        QDir(chosen).filePath(QStringLiteral("20200101-120000"));
+    const QString chosenBatch =
+        QDir(chosen).filePath(openscpui::newStagingBatchName());
+    test.check(QDir().mkpath(ownFolder) && QDir().mkpath(chosenBatch) &&
+                   age(ownFolder) && age(chosenBatch),
+               "the chosen root's old folders should exist");
+    test.check(openscpui::removeStagingBatchesOlderThan(
+                   chosen, QDateTime::currentDateTimeUtc().addDays(-7)) == 1 &&
+                   QFileInfo::exists(ownFolder) &&
+                   !QFileInfo::exists(chosenBatch),
+               "a chosen root should lose only batches OpenSCP named");
 }
 
 OPENSCP_TEST(testOnlyStagingBatchesAreCleanedAfterADrop, test) {
@@ -419,6 +573,8 @@ OPENSCP_TEST(testOnlyStagingBatchesAreCleanedAfterADrop, test) {
     test.check(
         QDir().mkpath(batch) && QDir().mkpath(outside) &&
             QDir().mkpath(QDir(root).filePath(QStringLiteral("Documents"))) &&
+            QDir().mkpath(
+                QDir(root).filePath(QStringLiteral("20200101-120000"))) &&
             QDir().mkpath(QDir(batch).filePath(QStringLiteral("nested"))),
         "the staging fixture should be created");
     QSettings settings(base.filePath(QStringLiteral("settings.ini")),
@@ -436,6 +592,8 @@ OPENSCP_TEST(testOnlyStagingBatchesAreCleanedAfterADrop, test) {
         QDir(batch).filePath(QStringLiteral("nested")),
         QDir(root).filePath(QStringLiteral("../20260101-120000")),
         QDir(root).filePath(QStringLiteral("20991231-235959")),
+        // A folder the user chose may hold their own dated folders.
+        QDir(root).filePath(QStringLiteral("20200101-120000")),
     };
     for (const QString &path : refused) {
         test.check(
@@ -443,12 +601,220 @@ OPENSCP_TEST(testOnlyStagingBatchesAreCleanedAfterADrop, test) {
             "only a batch directly in the staging root may be cleaned: " +
                 path.toStdString());
     }
-#ifndef _WIN32
     const QString link = QDir(root).filePath(QStringLiteral("20260101-130000"));
     test.check(
-        QFile::link(outside, link) &&
+        openscp::testsupport::createLocalLink(outside, link) &&
             openscpui::stagingBatchPathForCleanup(settings, link).isEmpty(),
         "a link named like a batch should not be followed");
+}
+
+// The default QSettings folders of this binary, set once in main(): a test
+// that pointed them at folders of its own would leave every later test on
+// folders that no longer exist.
+struct SettingsFolders {
+    QTemporaryDir user;
+    QTemporaryDir machine;
+};
+
+SettingsFolders &settingsFolders() {
+    static SettingsFolders folders;
+    return folders;
+}
+
+OPENSCP_TEST(testSettingsReadOnlyTheUsersOwnFile, test) {
+    // With IniFormat, QSettings would read a key missing from the user's file
+    // from the organization-wide file and from the machine-wide one, which on
+    // Windows sits under C:\ProgramData, where any user may write.
+    const SettingsFolders &folders = settingsFolders();
+    test.check(folders.user.isValid() && folders.machine.isValid(),
+               "the settings folders should be created");
+    if (!folders.user.isValid() || !folders.machine.isValid())
+        return;
+
+    QString organization;
+    QString application;
+    {
+        const openscpui::AppSettings store;
+        organization = store.organizationName();
+        application = store.applicationName();
+    }
+    const QString planted = QStringLiteral("/planted/by/another/account");
+    {
+        QSettings machineWide(QSettings::IniFormat, QSettings::SystemScope,
+                              organization, application);
+        machineWide.setValue(openscpui::settingskeys::kStagingRoot, planted);
+        QSettings organizationWide(QSettings::IniFormat, QSettings::UserScope,
+                                   organization);
+        organizationWide.setValue(
+            openscpui::settingskeys::kDefaultKnownHostsPolicy,
+            QStringLiteral("off"));
+    }
+
+    const openscpui::AppSettings store;
+    test.check(!store.contains(openscpui::settingskeys::kStagingRoot) &&
+                   openscpui::effectiveStagingRootPath(store) != planted,
+               "a machine-wide file must not supply the user's settings");
+    test.check(
+        !store.contains(openscpui::settingskeys::kDefaultKnownHostsPolicy),
+        "an organization-wide file must not supply the user's settings");
+    const openscpui::AppSettings named(organization, application);
+    test.check(!named.contains(openscpui::settingskeys::kStagingRoot),
+               "settings opened by name should read only the user's file");
+}
+
+#ifdef Q_OS_UNIX
+OPENSCP_TEST(testReadingSettingsLeavesTheirFileAlone, test) {
+    // Settings are opened and closed for every read; making an already
+    // private file private again changed its metadata each time.
+    QTemporaryDir folder;
+    const QString path = folder.filePath(QStringLiteral("settings.ini"));
+    {
+        openscpui::AppSettings store(path, QSettings::IniFormat);
+        store.setValue(QStringLiteral("key"), QStringLiteral("value"));
+    }
+    constexpr QFileDevice::Permissions othersMayRead =
+        QFileDevice::ReadGroup | QFileDevice::ReadOther;
+    QFileInfo file(path);
+    test.check(file.exists() && (file.permissions() & othersMayRead) == 0,
+               "a settings file should be written for its owner alone");
+    const QDateTime changed = file.metadataChangeTime();
+    // The clock must pass the last change, or a new one would not show.
+    while (QDateTime::currentDateTimeUtc() <= changed.addMSecs(20))
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    {
+        const openscpui::AppSettings store(path, QSettings::IniFormat);
+        (void)store.value(QStringLiteral("key"));
+    }
+    file.refresh();
+    test.check(file.metadataChangeTime() == changed,
+               "reading a setting should leave its file as it was");
+
+    test.check(QFile::setPermissions(path, QFileDevice::ReadOwner |
+                                               QFileDevice::WriteOwner |
+                                               othersMayRead),
+               "the settings file should take a looser mode");
+    {
+        const openscpui::AppSettings store(path, QSettings::IniFormat);
+        (void)store.value(QStringLiteral("key"));
+    }
+    file.refresh();
+    test.check((file.permissions() & othersMayRead) == 0,
+               "a settings file others can read should be made private again");
+}
+
+OPENSCP_TEST(testNewSettingsFilesAreNeverReadableByOthers, test) {
+    // QSettings writes through a temporary file that takes the mode of the
+    // file it replaces; for a new file, the umask's. Both were readable by
+    // others until the write ended, while another thread could look.
+    std::vector<QSettings::Format> formats = {QSettings::IniFormat};
+#ifndef Q_OS_DARWIN
+    // What the app uses outside Windows: the same INI file.
+    formats.push_back(QSettings::NativeFormat);
+#endif
+    QTemporaryDir folder;
+    for (const QSettings::Format format : formats) {
+        bool exposed = false;
+        for (int round = 0; round < 10 && !exposed; ++round) {
+            const QString directory =
+                folder.filePath(QStringLiteral("%1-%2")
+                                    .arg(static_cast<int>(format))
+                                    .arg(round));
+            const QString path = directory + QStringLiteral("/settings.ini");
+            test.check(QDir().mkpath(directory),
+                       "the settings folder should be created");
+            std::atomic<bool> writing{true};
+            std::atomic<bool> loose{false};
+            std::thread watcher([&] {
+                while (writing.load()) {
+                    for (const QFileInfo &entry : QDir(directory).entryInfoList(
+                             QDir::Files | QDir::Hidden)) {
+                        // QSettings' lock file holds no settings.
+                        if (entry.suffix() == QStringLiteral("lock"))
+                            continue;
+                        struct stat status {};
+                        if (::stat(
+                                QFile::encodeName(entry.filePath()).constData(),
+                                &status) == 0 &&
+                            (status.st_mode & 0077) != 0)
+                            loose = true;
+                    }
+                }
+            });
+            {
+                openscpui::AppSettings store(path, format);
+                store.setValue(QStringLiteral("key"), QStringLiteral("value"));
+            }
+            writing = false;
+            watcher.join();
+            exposed = loose.load();
+        }
+        test.check(!exposed,
+                   "a new settings file should never be readable by others, "
+                   "not even while it is first written (format " +
+                       std::to_string(static_cast<int>(format)) + ")");
+    }
+}
+#endif
+
+OPENSCP_TEST(testCountsTakeTheirPluralForms, test) {
+    // A count picks its form in every language, English too: the status bar
+    // said "Queued: 1 downloads".
+    const std::vector<std::pair<const char *, const char *>> messages = {
+        {"MainWindow", "Queued: %n downloads"},
+        {"SyncCoordinator", "%n folders could not be read."},
+        {"SyncDialog", "%n conflicts"}};
+    for (const char *language : {"de", "en", "es", "fr", "pt"}) {
+        QTranslator translator;
+        const QString catalog =
+            QStringLiteral(":/i18n/openscp_%1.qm").arg(QLatin1String(language));
+        test.check(translator.load(catalog),
+                   "the catalog should load: " + catalog.toStdString());
+        QCoreApplication::installTranslator(&translator);
+        for (const auto &[context, source] : messages) {
+            const QString one =
+                QCoreApplication::translate(context, source, nullptr, 1);
+            const QString two =
+                QCoreApplication::translate(context, source, nullptr, 2);
+            test.check(
+                QString(one).replace(QLatin1Char('1'), QLatin1Char('#')) !=
+                    QString(two).replace(QLatin1Char('2'), QLatin1Char('#')),
+                std::string(language) + " should not say one and two " +
+                    "the same way: " + one.toStdString() + " / " +
+                    two.toStdString());
+        }
+        QCoreApplication::removeTranslator(&translator);
+    }
+}
+
+OPENSCP_TEST(testLocalEntryNamesFollowThisComputer, test) {
+    test.check(isValidLocalEntryName(QStringLiteral("report.txt")),
+               "an ordinary name should be a valid local name");
+    test.check(!isValidLocalEntryName(QStringLiteral("..")),
+               "a relative reference is never a local name");
+#ifdef Q_OS_WIN
+    // REPORT~1.TXT and DOCUME~1 have the form of the short names Windows
+    // makes for long ones, which open the long-named entry instead.
+    for (const char *name :
+         {"a:b", "CON", "nul.txt", "COM1.log", "trailing.", "trailing ",
+          "what?", "pipe|name", "REPORT~1.TXT", "docume~1", "RE3A5F~1.TXT"}) {
+        QString why;
+        test.check(!isValidLocalEntryName(QString::fromUtf8(name), &why) &&
+                       !why.isEmpty(),
+                   std::string("Windows should refuse the local name ") + name);
+    }
+    // No short name Windows makes has a space, a longer base or extension,
+    // or no number after the tilde.
+    for (const char *name : {"README.TXT", "a b~1.txt", "FILE~1.HTML",
+                             "notes~2026.txt", "draft.txt~", "~$draft.docx"}) {
+        test.check(isValidLocalEntryName(QString::fromUtf8(name)),
+                   std::string("Windows should accept the local name ") + name);
+    }
+#else
+    test.check(isValidLocalEntryName(QStringLiteral("a:b")) &&
+                   isValidLocalEntryName(QStringLiteral("CON")) &&
+                   isValidLocalEntryName(QStringLiteral("trailing.")) &&
+                   isValidLocalEntryName(QStringLiteral("REPORT~1.TXT")),
+               "POSIX should accept the names only Windows refuses");
 #endif
 }
 
@@ -520,6 +886,12 @@ OPENSCP_TEST(testRowSelectionIgnoresRowsOutsideTheModel, test) {
 } // namespace
 
 int main(int argc, char **argv) {
+    const SettingsFolders &folders = settingsFolders();
+    QSettings::setDefaultFormat(QSettings::IniFormat);
+    QSettings::setPath(QSettings::IniFormat, QSettings::UserScope,
+                       folders.user.path());
+    QSettings::setPath(QSettings::IniFormat, QSettings::SystemScope,
+                       folders.machine.path());
     openscp::test::TestHarness harness("UI utility");
     return harness.runWithApplication<QCoreApplication>(argc, argv);
 }

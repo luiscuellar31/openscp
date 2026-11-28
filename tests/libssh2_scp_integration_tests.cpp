@@ -23,6 +23,7 @@ using openscp::testsupport::joinRemotePath;
 using openscp::testsupport::kSkipExitCode;
 using openscp::testsupport::parsePort;
 using openscp::testsupport::readFile;
+using openscp::testsupport::removeRemoteTree;
 using openscp::testsupport::uniqueToken;
 using openscp::testsupport::writeFile;
 
@@ -98,6 +99,17 @@ int main() {
             "SCP should not support resume");
 
     const std::string token = uniqueToken();
+    // SCP cannot delete, so the run keeps its files in a folder of its own
+    // that SFTP removes at the end.
+    const std::string runDir =
+        joinRemotePath(remoteBase, "openscp_scp_it_" + token);
+    openscp::SessionOptions sftpOptions = opt;
+    sftpOptions.protocol = openscp::Protocol::Sftp;
+    openscp::Libssh2SftpClient sftp;
+    err.clear();
+    t.checkWithError(
+        sftp.connect(sftpOptions, err) && sftp.mkdir(runDir, err, 0755),
+        "the run's remote folder should be created over SFTP: ", err);
     const fs::path tempDir =
         fs::temp_directory_path() / ("openscp_scp_" + token);
     const fs::path localUpload = tempDir / "upload.txt";
@@ -108,17 +120,41 @@ int main() {
         "openscp scp integration payload " + token + "\nline two\n";
     t.check(writeFile(localUpload, payload), "should write local upload file");
 
-    const std::string remotePath =
-        joinRemotePath(remoteBase, "openscp_scp_it_" + token + ".txt");
+    const std::string remotePath = joinRemotePath(runDir, "upload.txt");
 
     bool uploadProgressCalled = false;
     err.clear();
-    t.check(client.put(
-                localUpload.string(), remotePath, err,
-                [&](std::size_t, std::size_t) { uploadProgressCalled = true; },
-                {}, false),
-            std::string("SCP upload should succeed: ") + err);
+    t.checkWithError(
+        client.put(
+            localUpload.string(), remotePath, err,
+            [&](std::size_t, std::size_t) { uploadProgressCalled = true; }, {},
+            false),
+        "SCP upload should succeed: ", err);
     t.check(uploadProgressCalled, "upload progress callback should be called");
+
+    // Auto mode uploads through SFTP, so the queue can see what an upload
+    // would replace and ask first.
+    t.check(caps.can_stat && caps.can_read_metadata,
+            "Auto-mode SCP should describe remote files");
+    openscp::FileInfo uploadedInfo{};
+    err.clear();
+    t.checkWithError(client.stat(remotePath, uploadedInfo, err) &&
+                         uploadedInfo.size == payload.size(),
+                     "Auto-mode SCP should stat the uploaded file: ", err);
+    err.clear();
+    t.check(!client.stat(remotePath + ".missing", uploadedInfo, err) &&
+                err.empty(),
+            "Auto-mode SCP should report a missing file without an error");
+    // "Rename" in the conflict prompt looks for a free name with exists().
+    bool isDirectory = true;
+    err.clear();
+    t.checkWithError(client.exists(remotePath, isDirectory, err) &&
+                         !isDirectory,
+                     "Auto-mode SCP should find the uploaded file: ", err);
+    err.clear();
+    t.check(!client.exists(remotePath + ".missing", isDirectory, err) &&
+                err.empty(),
+            "Auto-mode SCP should take a missing name as free");
 
     // Waiting for the channel to close instead of acknowledging SCP's final
     // status byte stalls each download until the session timeout.
@@ -126,12 +162,12 @@ int main() {
     bool downloadProgressCalled = false;
     err.clear();
     auto started = std::chrono::steady_clock::now();
-    t.check(
+    t.checkWithError(
         client.get(
             remotePath, localDownload.string(), err,
             [&](std::size_t, std::size_t) { downloadProgressCalled = true; },
             {}, false),
-        std::string("SCP download should succeed: ") + err);
+        "SCP download should succeed: ", err);
     t.check(std::chrono::steady_clock::now() - started < kTimeoutStall,
             "SCP download should not wait for the session timeout");
     t.check(downloadProgressCalled,
@@ -147,18 +183,20 @@ int main() {
     scpOnlyOptions.scp_transfer_mode = openscp::ScpTransferMode::ScpOnly;
     openscp::Libssh2ScpClient scpOnlyClient;
     err.clear();
-    t.check(scpOnlyClient.connect(scpOnlyOptions, err),
-            std::string("SCP-only connect should succeed: ") + err);
+    t.checkWithError(scpOnlyClient.connect(scpOnlyOptions, err),
+                     "SCP-only connect should succeed: ", err);
+    t.check(!scpOnlyClient.capabilities().can_stat,
+            "SCP-only mode should not offer stat");
     const fs::path scpOnlyDownload = tempDir / "scp_only_download.txt";
     for (int attempt = 0; attempt < 2; ++attempt) {
         err.clear();
         downloaded.clear();
         started = std::chrono::steady_clock::now();
-        t.check(scpOnlyClient.get(remotePath, scpOnlyDownload.string(), err, {},
-                                  {}, false),
-                std::string("SCP-only download should succeed on a reused "
-                            "session: ") +
-                    err);
+        t.checkWithError(scpOnlyClient.get(remotePath, scpOnlyDownload.string(),
+                                           err, {}, {}, false),
+                         "SCP-only download should succeed on a reused "
+                         "session: ",
+                         err);
         t.check(std::chrono::steady_clock::now() - started < kTimeoutStall,
                 "SCP-only download should not wait for the session timeout");
         t.check(readFile(scpOnlyDownload, downloaded) && downloaded == payload,
@@ -170,25 +208,25 @@ int main() {
     // The upload waits for the remote scp to confirm the write, which is
     // where it reports a full disk.
     const std::string scpOnlyRemotePath =
-        joinRemotePath(remoteBase, "openscp_scp_only_it_" + token + ".txt");
+        joinRemotePath(runDir, "scp-only-upload.txt");
     err.clear();
-    t.check(scpOnlyClient.put(localUpload.string(), scpOnlyRemotePath, err, {},
-                              {}, false),
-            std::string("SCP-only upload should succeed: ") + err);
+    t.checkWithError(scpOnlyClient.put(localUpload.string(), scpOnlyRemotePath,
+                                       err, {}, {}, false),
+                     "SCP-only upload should succeed: ", err);
     err.clear();
     downloaded.clear();
-    t.check(scpOnlyClient.get(scpOnlyRemotePath, scpOnlyDownload.string(), err,
-                              {}, {}, false) &&
-                readFile(scpOnlyDownload, downloaded) && downloaded == payload,
-            std::string("SCP-only upload should round-trip: ") + err);
+    t.checkWithError(
+        scpOnlyClient.get(scpOnlyRemotePath, scpOnlyDownload.string(), err, {},
+                          {}, false) &&
+            readFile(scpOnlyDownload, downloaded) && downloaded == payload,
+        "SCP-only upload should round-trip: ", err);
     t.check(scpOnlyClient.lastDownloadModifiedTime().value_or(0) > 0,
             "an SCP download should report the file's modification time");
 #ifndef _WIN32
     // SCP creates the file with the local permissions too; SFTP reads them.
     {
         const fs::path localPrivate = tempDir / "private.txt";
-        const std::string remotePrivate =
-            joinRemotePath(remoteBase, "openscp_scp_private_" + token + ".txt");
+        const std::string remotePrivate = joinRemotePath(runDir, "private.txt");
         std::error_code permissionsError;
         const bool written = writeFile(localPrivate, "private");
         fs::permissions(localPrivate,
@@ -199,15 +237,16 @@ int main() {
         inspectorOptions.protocol = openscp::Protocol::Sftp;
         openscp::FileInfo uploaded{};
         err.clear();
-        t.check(written && !permissionsError &&
-                    scpOnlyClient.put(localPrivate.string(), remotePrivate, err,
-                                      {}, {}, false) &&
-                    inspector.connect(inspectorOptions, err) &&
-                    inspector.stat(remotePrivate, uploaded, err) &&
-                    (uploaded.mode & 0777u) == 0600u,
-                std::string("an SCP upload should keep the local "
-                            "permissions: ") +
-                    err);
+        t.checkWithError(written && !permissionsError &&
+                             scpOnlyClient.put(localPrivate.string(),
+                                               remotePrivate, err, {}, {},
+                                               false) &&
+                             inspector.connect(inspectorOptions, err) &&
+                             inspector.stat(remotePrivate, uploaded, err) &&
+                             (uploaded.mode & 0777u) == 0600u,
+                         "an SCP upload should keep the local "
+                         "permissions: ",
+                         err);
         (void)inspector.removeFile(remotePrivate, err);
         inspector.disconnect();
     }
@@ -260,9 +299,7 @@ int main() {
         const bool uploaded =
             ready &&
             interrupted.put(
-                largeUpload.string(),
-                joinRemotePath(remoteBase,
-                               "openscp_scp_it_interrupted_" + token + ".bin"),
+                largeUpload.string(), joinRemotePath(runDir, "interrupted.bin"),
                 interruptErr,
                 [&](std::size_t done, std::size_t) {
                     if (done > 0 && !interruptRequested) {
@@ -277,6 +314,8 @@ int main() {
     }
 
     client.disconnect();
+    removeRemoteTree(sftp, runDir);
+    sftp.disconnect();
     std::error_code ec;
     fs::remove_all(tempDir, ec);
     return openscp::testsupport::finishIntegration(

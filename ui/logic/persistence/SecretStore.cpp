@@ -18,8 +18,11 @@
 #include <string>
 
 #ifdef Q_OS_WIN
-#include <wincrypt.h>
+// wincrypt.h needs the types windows.h declares.
+// clang-format off
 #include <windows.h>
+#include <wincrypt.h>
+// clang-format on
 #endif
 
 #ifdef __APPLE__
@@ -620,8 +623,9 @@ SecretStore::LoadResult SecretStore::getSecret(const QString &key) const {
     QVariant storedValue = settings.value(key);
     if (!storedValue.isValid())
         return {LoadStatus::Missing, {}, {}};
-    QString str = storedValue.toString();
-    QByteArray utf8 = str.toUtf8();
+    // Straight to bytes, which can be wiped, without a QString copy.
+    QByteArray utf8 = storedValue.toByteArray();
+    storedValue.clear();
     openscp::SecureString out(std::string_view(
         utf8.constData(), static_cast<std::size_t>(utf8.size())));
     utf8.fill('\0');
@@ -664,12 +668,3 @@ bool SecretStore::insecureFallbackActive() {
 }
 
 #endif
-
-SecretStore::PersistResult SecretStore::setSecret(const QString &key,
-                                                  const QString &value) {
-    QByteArray utf8 = value.toUtf8();
-    openscp::SecureString sec(std::string_view(
-        utf8.constData(), static_cast<std::size_t>(utf8.size())));
-    utf8.fill('\0');
-    return setSecret(key, sec);
-}

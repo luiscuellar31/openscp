@@ -504,7 +504,8 @@ void SiteManagerDialog::onDuplicate() {
     for (int suffix = 2;
          hasDuplicateSiteName(sites, duplicate.name) && suffix < 10000;
          ++suffix) {
-        duplicate.name = tr("%1 copy %2").arg(sourceName).arg(suffix);
+        duplicate.name =
+            tr("%1 copy %2").arg(sourceName, QString::number(suffix));
     }
     if (hasDuplicateSiteName(sites, duplicate.name)) {
         duplicate.name =
@@ -535,6 +536,21 @@ void SiteManagerDialog::onRemove() {
     const int modelIndex = selectedSiteIndex();
     if (modelIndex < 0 || modelIndex >= sites_.size())
         return;
+    openscpui::AppSettings settings;
+    const bool deleteSecrets =
+        settings
+            .value(openscpui::settingskeys::kSitesDeleteSecretsOnRemove, false)
+            .toBool();
+    const QString name = sites_[modelIndex].name;
+    const QString question =
+        deleteSecrets
+            ? tr("Delete the site \"%1\" and its saved credentials?\n\nThis "
+                 "cannot be undone.")
+                  .arg(name)
+            : tr("Delete the site \"%1\"?\n\nThis cannot be undone.").arg(name);
+    if (UiAlerts::question(this, tr("Delete site"), question) !=
+        QMessageBox::Yes)
+        return;
     QVector<SiteEntry> sites = storedSites();
     const int storedIndex = siteIndexById(sites, sites_[modelIndex].siteId);
     // Capture fields before removing for optional cleanup
@@ -547,11 +563,6 @@ void SiteManagerDialog::onRemove() {
         return;
     }
     // Optionally delete stored credentials for this site
-    openscpui::AppSettings settings;
-    const bool deleteSecrets =
-        settings
-            .value(openscpui::settingskeys::kSitesDeleteSecretsOnRemove, false)
-            .toBool();
     if (deleteSecrets) {
         showPersistIssues(
             this,
@@ -591,7 +602,8 @@ void SiteManagerDialog::offerHostKeyRemoval(
     }
 
     const QString server =
-        port == 22 ? host : QStringLiteral("%1:%2").arg(host).arg(port);
+        port == 22 ? host
+                   : QStringLiteral("%1:%2").arg(host, QString::number(port));
     if (UiAlerts::question(
             this, tr("Remove host key"),
             tr("Also remove the saved host key of %1 from %2?\n\nOther "

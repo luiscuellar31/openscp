@@ -30,9 +30,16 @@ std::string knownHostsLine(const std::string &hostToken,
 std::string
 hostKeyAlgorithmPreference(const std::vector<std::string> &recordedKeyTypes);
 
+/// Whether a "@revoked" line of known_hosts holds the raw host key `key`,
+/// which OpenSSH then refuses. The hosts the line names are not compared: a
+/// revoked key must never be accepted, and they are usually "*".
+bool hostKeyRevoked(const std::vector<std::string> &lines,
+                    const unsigned char *key, std::size_t keyLength);
+
 /// Appends `line` to the known_hosts file at `path`, which is created with
-/// mode 0600, and its folder with 0700, when missing. The rest of the file,
-/// its permissions, an existing folder's permissions and a symbolic link at
+/// mode 0600, and its folder with 0700, when missing; on Windows both inherit
+/// the permissions of the folder they are made in. The rest of the file, its
+/// permissions, an existing folder's permissions and a symbolic link at
 /// `path` stay as they are.
 bool appendKnownHostsLine(const std::string &path, const std::string &line,
                           std::string &error);

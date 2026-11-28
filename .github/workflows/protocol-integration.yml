@@ -86,6 +86,12 @@ jobs:
           PrintMotd no
           UseDNS no
           EOF
+          # OpenSSH 9.8 and later penalize an address whose connections end
+          # before logging in, as ssh-keyscan and refused host keys do, and
+          # then drop 127.0.0.1 in the middle of the tests.
+          if sudo /usr/sbin/sshd -t -f /tmp/openscp_sshd_config -o PerSourcePenalties=no 2>/dev/null; then
+            echo "PerSourcePenalties no" | sudo tee -a /tmp/openscp_sshd_config >/dev/null
+          fi
 
           sudo /usr/sbin/sshd -t -f /tmp/openscp_sshd_config
           sudo /usr/sbin/sshd -f /tmp/openscp_sshd_config \
@@ -132,6 +138,8 @@ jobs:
           OPENSCP_IT_SFTP_USER: openscp_it
           OPENSCP_IT_SFTP_KEY: /tmp/openscp_it_linux_ed25519
           OPENSCP_IT_REMOTE_BASE: /home/openscp_it/upload
+          # The server has ED25519 and RSA keys, so no check may be skipped.
+          OPENSCP_IT_REQUIRE_ALL_CHECKS: "1"
         run: |
           set -o pipefail
           ./build/tests/openscp_sftp_integration_tests 2>&1 | \
@@ -156,7 +164,7 @@ jobs:
 
       - name: Upload SSH service log on failure
         if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ssh-service-log
           path: /tmp/openscp_sshd.log
@@ -308,7 +316,7 @@ jobs:
 
       - name: Upload service logs on failure
         if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: protocol-service-logs
           path: /tmp/openscp-protocol-it/logs
@@ -316,7 +324,7 @@ jobs:
 
   sanitizers:
     name: ${{ matrix.name }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 35
     strategy:
       fail-fast: false
@@ -325,9 +333,14 @@ jobs:
           - name: ASan + UBSan
             id: asan-ubsan
             flags: address,undefined
+            runner: ubuntu-latest
+          # On Ubuntu 26.04, with Qt 6.10, TSan reports leaks of Qt's own
+          # threads in the GUI tests and fails one of its own checks when Qt
+          # starts a thread; on 24.04 those tests pass.
           - name: TSan
             id: tsan
             flags: thread
+            runner: ubuntu-24.04
 
     steps:
       - name: Checkout

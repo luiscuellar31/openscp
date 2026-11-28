@@ -45,11 +45,11 @@ void checkCollectionsSurviveMutations(openscp::RemoteClient &client,
     const std::string sibling = joinRemotePath(remoteDirectory, "sibling.txt");
 
     std::string error;
-    test.check(
+    test.checkWithError(
         client.mkdir(folder, error) &&
             client.put(localPayload.string(), child, error, {}, {}, false) &&
             client.put(localPayload.string(), sibling, error, {}, {}, false),
-        "WebDAV: should create a folder with a child: " + error);
+        "WebDAV: should create a folder with a child: ", error);
     const auto failsWith = [&client](bool succeeded,
                                      openscp::RemoteErrorKind kind) {
         return !succeeded && client.lastOperationError().kind == kind;
@@ -83,10 +83,10 @@ void checkCollectionsSurviveMutations(openscp::RemoteClient &client,
                "contents");
 
     error.clear();
-    test.check(client.removeFile(child, error) &&
-                   client.removeDir(folder, error) &&
-                   client.removeFile(sibling, error),
-               "WebDAV: an emptied collection should be removable: " + error);
+    test.checkWithError(
+        client.removeFile(child, error) && client.removeDir(folder, error) &&
+            client.removeFile(sibling, error),
+        "WebDAV: an emptied collection should be removable: ", error);
 }
 
 } // namespace

@@ -2,6 +2,8 @@
 #include "AppVersion.hpp"
 #include "app/MainWindow.hpp"
 #include "logic/common/AppSettings.hpp"
+#include "logic/common/SingleInstance.hpp"
+#include "logic/common/UiAlerts.hpp"
 #if defined(OPENSCP_DEMO_MODE) && OPENSCP_DEMO_MODE
 #include "logic/demo/DemoData.hpp"
 #endif
@@ -11,6 +13,8 @@
 #include <QFile>
 #include <QLibraryInfo>
 #include <QLocale>
+#include <QSettings>
+#include <QStandardPaths>
 #include <QTranslator>
 
 int main(int argc, char *argv[]) {
@@ -21,6 +25,12 @@ int main(int argc, char *argv[]) {
     QCoreApplication::setApplicationName("OpenSCP");
 #endif
     QCoreApplication::setOrganizationName("OpenSCP");
+#ifdef Q_OS_WIN
+    // Settings, and the DPAPI-encrypted secrets, go to INI files under
+    // %APPDATA%\OpenSCP, as Linux keeps them under ~/.config, instead of the
+    // registry: they can be backed up, moved and inspected like any file.
+    QSettings::setDefaultFormat(QSettings::IniFormat);
+#endif
 
     QCoreApplication::setApplicationVersion(
         QStringLiteral(OPENSCP_APP_VERSION));
@@ -42,14 +52,13 @@ int main(int argc, char *argv[]) {
         QDir(QCoreApplication::applicationDirPath()).absolutePath();
     const QString resourceTranslationPath =
         ":/i18n/" + translationBaseName + ".qm";
-    // English is the source language: no app translator is needed for "en".
-    if (languageCode != QStringLiteral("en")) {
-        if (QFile::exists(resourceTranslationPath)
-                ? translator.load(resourceTranslationPath)
-                : (translator.load(translationBaseName, transDir1) ||
-                   translator.load(translationBaseName, transDir2))) {
-            app.installTranslator(&translator);
-        }
+    // English is the source language; its catalog holds only the forms that
+    // depend on a count, such as "1 file" and "2 files".
+    if (QFile::exists(resourceTranslationPath)
+            ? translator.load(resourceTranslationPath)
+            : (translator.load(translationBaseName, transDir1) ||
+               translator.load(translationBaseName, transDir2))) {
+        app.installTranslator(&translator);
     }
     static QTranslator qtTranslator;
     const QString qtBaseName = QString("qtbase_%1").arg(languageCode);
@@ -60,11 +69,40 @@ int main(int argc, char *argv[]) {
                           QStringLiteral("_"), qtTransPath)) {
         app.installTranslator(&qtTranslator);
     }
+
+    // One OpenSCP per data folder, which holds the transfer queue: a second
+    // launch brings the running window forward instead of opening another
+    // one over the same queue.
+    openscpui::SingleInstance instance(
+        QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation));
+    switch (instance.start()) {
+    case openscpui::SingleInstance::Role::Primary:
+        break;
+    case openscpui::SingleInstance::Role::Forwarded:
+        return 0;
+    case openscpui::SingleInstance::Role::Unreachable:
+        UiAlerts::information(
+            nullptr, QCoreApplication::applicationName(),
+            QCoreApplication::translate(
+                "MainWindow",
+                "OpenSCP is already running, but it did not respond. Wait "
+                "for it to finish starting or closing, then try again."));
+        return 0;
+    }
+
 #if defined(OPENSCP_DEMO_MODE) && OPENSCP_DEMO_MODE
     openscpui::demo::seedSampleDataIfEmpty();
 #endif
 
     MainWindow w;
+    QObject::connect(
+        &instance, &openscpui::SingleInstance::activationRequested, &w, [&w] {
+            w.setWindowState((w.windowState() & ~Qt::WindowMinimized) |
+                             Qt::WindowActive);
+            w.show();
+            w.raise();
+            w.activateWindow();
+        });
     w.show();
     return app.exec();
 }

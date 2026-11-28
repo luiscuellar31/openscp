@@ -30,6 +30,9 @@ class TransferQueueWriter final {
     // Called from the writer thread when a snapshot could not be saved; later
     // failures are not reported again until a snapshot is saved.
     void setWarningHandler(WarningHandler onWarning);
+    // Called from the writer thread after every snapshot it could not save,
+    // with the number of saves that have failed in a row.
+    void setFailureHandler(std::function<void(int failuresInARow)> onFailure);
     // Snapshots are dropped until a path is set.
     void setPath(QString path);
 
@@ -48,6 +51,7 @@ class TransferQueueWriter final {
     std::condition_variable idle_;
     QString path_;
     WarningHandler onWarning_;
+    std::function<void(int)> onFailure_;
     std::optional<QVector<TransferTask>> pending_;
     bool writing_ = false;
     bool stopped_ = false;

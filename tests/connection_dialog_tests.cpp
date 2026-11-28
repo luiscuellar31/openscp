@@ -258,6 +258,46 @@ OPENSCP_TEST(testConfiguredSectionsExpandWhenEditing, test) {
                "disclosure state must not change connection semantics");
 }
 
+OPENSCP_TEST(testEditingKeepsTheJumpHost, test) {
+    // Windows used to drop a saved site's jump host when the site was edited.
+    clearSettings();
+    ConnectionDialog dialog;
+    openscp::SessionOptions options;
+    options.protocol = openscp::Protocol::Sftp;
+    options.host = "sftp.example";
+    options.port = 22;
+    options.username = "alice";
+    options.jump_host = std::string("bastion.example");
+    options.jump_port = 2222;
+    options.jump_username = std::string("ops");
+    options.jump_private_key_path = std::string("/tmp/bastion_ed25519");
+
+    dialog.setOptions(options);
+    const openscp::SessionOptions restored = dialog.options();
+    test.check(restored.jump_host == options.jump_host &&
+                   restored.jump_port == options.jump_port &&
+                   restored.jump_username == options.jump_username &&
+                   restored.jump_private_key_path ==
+                       options.jump_private_key_path,
+               "editing a site should keep its SSH jump host");
+}
+
+OPENSCP_TEST(testEditingKeepsAWebDavBasePathWithPercentSigns, test) {
+    // The dialog showed a folder named "a%20b" as typed, and reading it back
+    // decoded it into "a b".
+    clearSettings();
+    ConnectionDialog dialog;
+    openscp::SessionOptions options;
+    options.protocol = openscp::Protocol::WebDav;
+    options.host = "dav.example";
+    options.port = 443;
+    options.username = "alice";
+    options.webdav_base_path = "/shared/a%20b";
+    dialog.setOptions(options);
+    test.check(dialog.options().webdav_base_path == "/shared/a%20b",
+               "editing a site should keep its WebDAV base path");
+}
+
 OPENSCP_TEST(testAcceptButtonCanDescribeTheAction, test) {
     clearSettings();
     ConnectionDialog dialog;
@@ -345,7 +385,7 @@ int main(int argc, char **argv) {
     }
 
     openscp::test::TestHarness harness("Connection dialog");
-    const int result = harness.run();
+    const int result = harness.run(argc, argv);
     clearSettings();
     openscp::testsupport::drainThreadPool();
     return result;

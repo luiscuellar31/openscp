@@ -13,7 +13,6 @@
 #include <future>
 #include <mutex>
 #include <string>
-#include <thread>
 #include <utility>
 #include <vector>
 
@@ -118,13 +117,18 @@ OPENSCP_TEST(testConcurrentHostKeyPromptsAreSerialized, test) {
     });
     test.check(waitForPresentations(presentedChanged, mutex, presented, 1),
                "the first concurrent prompt should be presented");
+    // Waiting only once the second request runs, for a presentation that
+    // must not come, keeps a slow thread start from passing unchecked.
+    std::promise<void> secondRunning;
     auto second = std::async(std::launch::async, [&] {
+        secondRunning.set_value();
         return coordinator.requestDecision(prompt(QStringLiteral("second")));
     });
-    std::this_thread::sleep_for(20ms);
+    secondRunning.get_future().wait();
     {
-        std::lock_guard<std::mutex> lock(mutex);
-        test.check(presented.size() == 1,
+        std::unique_lock<std::mutex> lock(mutex);
+        test.check(!presentedChanged.wait_for(
+                       lock, 100ms, [&] { return presented.size() > 1; }),
                    "a second prompt must not overwrite the active prompt");
     }
 
@@ -377,6 +381,22 @@ OPENSCP_TEST(testTlsKeyPinsAreRememberedPerServer, test) {
     test.check(openscpui::tlsKeyFingerprint(pin) ==
                    QStringLiteral("SHA256:c2VydmVyLWtleQ=="),
                "a pin should be shown as a SHA256 fingerprint");
+}
+
+OPENSCP_TEST(testTlsKeyPinsDoNotCrossHostsWithAZoneIndex, test) {
+    // The port went in with a second arg(), which also replaced the "%4" of
+    // a zone index: fe80::1%4 and fe80::1990, both on port 990, shared a pin.
+    openscp::testsupport::IsolatedSettings settings;
+    test.check(settings.isValid(), "test settings should be isolated");
+    openscp::SessionOptions zoned = unverifiedFtpsOptions();
+    zoned.host = "fe80::1%4";
+    zoned.port = 990;
+    openscpui::rememberTlsKeyPin(zoned, "sha256//c2VydmVyLWtleQ==");
+    openscp::SessionOptions other = zoned;
+    other.host = "fe80::1990";
+    test.check(openscpui::trustedTlsKeyPin(zoned).has_value() &&
+                   !openscpui::trustedTlsKeyPin(other).has_value(),
+               "a pin should stay with the host that has the zone index");
 }
 
 } // namespace

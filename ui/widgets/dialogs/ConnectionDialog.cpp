@@ -180,8 +180,9 @@ ConnectionDialog::ConnectionDialog(QWidget *parent) : QDialog(parent) {
         Qt::ToolTipRole);
     scpMode_->setItemData(
         1,
-        tr("Classic SCP writes directly to the final remote path. A canceled "
-           "or failed upload may leave a partial destination."),
+        tr("Classic SCP writes directly to the final remote path and "
+           "replaces a file of the same name without asking. A canceled or "
+           "failed upload may leave a partial destination."),
         Qt::ToolTipRole);
     {
         openscpui::AppSettings settings;
@@ -270,12 +271,6 @@ ConnectionDialog::ConnectionDialog(QWidget *parent) : QDialog(parent) {
     jumpUser_->setPlaceholderText(tr("optional"));
     jumpKeyPath_->setPlaceholderText(tr("optional"));
     jumpKeyBrowse_->setText(tr("Choose…"));
-#ifdef Q_OS_WIN
-    jumpEnabled_->setChecked(false);
-    jumpEnabled_->setEnabled(false);
-    jumpEnabled_->setToolTip(
-        tr("SSH jump host is currently unavailable on Windows."));
-#endif
 
     // Reserve enough room for useful values without letting a disclosed row
     // dictate a different dialog width.
@@ -673,11 +668,8 @@ ConnectionDialog::ConnectionDialog(QWidget *parent) : QDialog(parent) {
         const auto protocol = protocol_ ? static_cast<openscp::Protocol>(
                                               protocol_->currentData().toInt())
                                         : openscp::Protocol::Sftp;
-        bool jumpSupported =
+        const bool jumpSupported =
             openscp::capabilitiesForProtocol(protocol).supports_jump_host;
-#ifdef Q_OS_WIN
-        jumpSupported = false;
-#endif
         if (!jumpSupported && jumpEnabled_ && jumpEnabled_->isChecked()) {
             const QSignalBlocker blocker(jumpEnabled_);
             jumpEnabled_->setChecked(false);
@@ -1174,7 +1166,7 @@ openscp::SessionOptions ConnectionDialog::options() const {
                 webDavScheme_->currentData().toInt()));
     }
     if (webDavBasePath_) {
-        sessionOptions.webdav_base_path = openscp::normalizeWebDavBasePath(
+        sessionOptions.webdav_base_path = openscp::webDavBasePathFromText(
             webDavBasePath_->text().trimmed().toStdString());
     }
     sessionOptions.host = host_->text().toStdString();
@@ -1223,10 +1215,7 @@ openscp::SessionOptions ConnectionDialog::options() const {
             static_cast<openscp::ProxyType>(proxyType_->currentData().toInt()));
     }
     const auto caps = openscp::capabilitiesForProtocol(sessionOptions.protocol);
-    bool jumpSupported = caps.supports_jump_host;
-#ifdef Q_OS_WIN
-    jumpSupported = false;
-#endif
+    const bool jumpSupported = caps.supports_jump_host;
     const bool useJump = jumpEnabled_ && jumpSupported &&
                          jumpEnabled_->isChecked() &&
                          !jumpHost_->text().trimmed().isEmpty();
@@ -1355,8 +1344,9 @@ void ConnectionDialog::setOptions(const openscp::SessionOptions &options) {
             openscp::normalizeWebDavScheme(options.webdav_scheme);
     }
     if (webDavBasePath_) {
-        webDavBasePath_->setText(QString::fromStdString(
-            openscp::normalizeWebDavBasePath(options.webdav_base_path)));
+        webDavBasePath_->setText(
+            QString::fromStdString(openscp::webDavBasePathToText(
+                openscp::normalizeWebDavBasePath(options.webdav_base_path))));
     }
     if (webDavVerifyPeer_)
         webDavVerifyPeer_->setChecked(options.webdav_verify_peer);
@@ -1371,10 +1361,7 @@ void ConnectionDialog::setOptions(const openscp::SessionOptions &options) {
     }
 
     const auto caps = openscp::capabilitiesForProtocol(effectiveProtocol);
-    bool jumpSupportedInUi = caps.supports_jump_host;
-#ifdef Q_OS_WIN
-    jumpSupportedInUi = false;
-#endif
+    const bool jumpSupportedInUi = caps.supports_jump_host;
     const bool hasJump = jumpSupportedInUi && options.jump_host.has_value() &&
                          !options.jump_host->empty();
     const bool proxySupportedInUi = caps.supports_proxy;
@@ -1559,10 +1546,7 @@ void ConnectionDialog::updateProtocolUi(openscp::Protocol protocol,
     setFormRowVisible(formLayout_, integrityPolicy_,
                       caps.can_checksum && securityExpanded);
 
-    bool jumpSupported = caps.supports_jump_host;
-#ifdef Q_OS_WIN
-    jumpSupported = false;
-#endif
+    const bool jumpSupported = caps.supports_jump_host;
     const bool networkExpanded =
         networkSection_ && networkSection_->isExpanded();
     if (networkSection_)

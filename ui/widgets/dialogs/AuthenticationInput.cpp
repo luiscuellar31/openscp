@@ -4,6 +4,7 @@
 
 #include <QInputDialog>
 #include <QPointer>
+#include <QTextDocument>
 #include <QThread>
 #include <QTimer>
 
@@ -40,7 +41,10 @@ bool requestAuthenticationInput(QWidget *parent, std::stop_token stopToken,
             auto *dialog = new QInputDialog(owner);
             dialog->setAttribute(Qt::WA_DeleteOnClose);
             dialog->setWindowTitle(title);
-            dialog->setLabelText(prompt);
+            // The server writes the prompt; show it as text, never as
+            // markup that could pass for one of OpenSCP's own messages.
+            dialog->setLabelText(
+                Qt::convertFromPlainText(prompt, Qt::WhiteSpaceNormal));
             dialog->setTextEchoMode(echoMode);
             dialog->setWindowModality(Qt::WindowModal);
             QObject::connect(

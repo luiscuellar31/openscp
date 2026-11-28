@@ -4,6 +4,7 @@
 #include "logic/common/TimeUtils.hpp"
 #include "logic/common/UiAlerts.hpp"
 #include "logic/navigation/RemotePath.hpp"
+#include "logic/transfers/MarkOfTheWeb.hpp"
 #include "openscp/RemoteClient.hpp"
 #include "openscp/RuntimeLogging.hpp"
 #include "openscp/SafeLocalFile.hpp"
@@ -56,6 +57,14 @@ std::string localReservationKey(const QString &path) {
 bool canRetry(const TransferTask &task) {
     return task.status == Status::Error || task.status == Status::Canceled ||
            task.status == Status::Warning || skippedAfterFailure(task);
+}
+
+// A transfer that already wrote part of its destination, which its next run
+// continues; the precheck drops the resume where the backend cannot.
+bool keepsPartialData(const TransferTask &task) {
+    return task.phase == TransferPhase::Transfer && task.bytesDone > 0 &&
+           (task.type == TransferTask::Type::Download ||
+            task.type == TransferTask::Type::Upload);
 }
 
 const char *statusName(Status status) {
@@ -119,18 +128,6 @@ QString errorForUi(const std::string &rawError) {
     return message;
 }
 
-// "name (N).ext", split at the last dot for uploads and downloads alike. A
-// name whose only dot starts it, such as ".bashrc", has no extension. The
-// single arg() call keeps a "%1" in the name from being replaced.
-QString numberedFileName(const QString &filename, int suffix) {
-    const qsizetype dot = filename.lastIndexOf(QLatin1Char('.'));
-    const bool hasExtension = dot > 0;
-    const QString base = hasExtension ? filename.left(dot) : filename;
-    const QString extension = hasExtension ? filename.mid(dot) : QString();
-    return QStringLiteral("%1 (%2)%3")
-        .arg(base, QString::number(suffix), extension);
-}
-
 QString numberedPath(const QString &path, int suffix) {
     const QFileInfo info(path);
     const QString directory = info.path();
@@ -147,7 +144,61 @@ QString numberedRemotePath(const QString &path, int suffix) {
     return directory + numberedFileName(filename, suffix);
 }
 
+// Whether the local entry `info` names exists only under another name, as
+// "Makefile" for "makefile" on a volume that ignores case, as Windows and
+// macOS volumes do: it is then another file, not the destination as spelled.
+// Names that differ only in Unicode normalization count as the same name.
+bool existsUnderAnotherName(const QFileInfo &info) {
+    if (!info.exists())
+        return false;
+    const QString actual =
+        QString::fromStdString(openscp::localfiles::localEntryName(
+            info.absoluteFilePath().toStdString()));
+    return !actual.isEmpty() &&
+           actual.normalized(QString::NormalizationForm_C) !=
+               info.fileName().normalized(QString::NormalizationForm_C);
+}
+
+// The folder of a download's destination that exists only under another
+// name, as "docs" stored as "Docs": two remote folders would merge into one.
+// Only folders named after the remote path are checked, so the folder the
+// user chose to download into may be spelled in any case, unless it has the
+// name of a remote folder in the path.
+QString folderUnderAnotherName(const TransferTask &task) {
+    QStringList remoteFolders = task.src.split('/', Qt::SkipEmptyParts);
+    if (!remoteFolders.isEmpty())
+        remoteFolders.removeLast();
+    QFileInfo folder(QFileInfo(task.dst).path());
+    while (!remoteFolders.isEmpty()) {
+        if (folder.fileName() != remoteFolders.takeLast())
+            break;
+        if (existsUnderAnotherName(folder))
+            return folder.fileName();
+        folder = QFileInfo(folder.path());
+    }
+    return {};
+}
+
+// A failure of the local file system. The worker connection's last error may
+// belong to an earlier task, and a transient one would retry this one.
+openscp::RemoteError localFailure(const std::string &message) {
+    openscp::RemoteError error;
+    error.kind = openscp::RemoteErrorKind::LocalIo;
+    error.message = message;
+    return error;
+}
+
 } // namespace
+
+// The single arg() call keeps a "%1" in the name from being replaced.
+QString numberedFileName(const QString &filename, int suffix) {
+    const qsizetype dot = filename.lastIndexOf(QLatin1Char('.'));
+    const bool hasExtension = dot > 0;
+    const QString base = hasExtension ? filename.left(dot) : filename;
+    const QString extension = hasExtension ? filename.mid(dot) : QString();
+    return QStringLiteral("%1 (%2)%3")
+        .arg(base, QString::number(suffix), extension);
+}
 
 struct TransferManager::WorkerSlot {
     explicit WorkerSlot(std::size_t slotIndex) : index(slotIndex) {}
@@ -178,6 +229,32 @@ TransferManager::TransferManager(QObject *parent) : QObject(parent) {
     persistenceTimer_->setInterval(kPersistenceDelayMs);
     connect(persistenceTimer_, &QTimer::timeout, this,
             &TransferManager::writeQueueSnapshot);
+    persistenceRetryTimer_ = new QTimer(this);
+    persistenceRetryTimer_->setSingleShot(true);
+    connect(persistenceRetryTimer_, &QTimer::timeout, this,
+            &TransferManager::schedulePersistence);
+    // A snapshot that was not saved, as when an antivirus holds the file on
+    // Windows, is not the saved state: its fingerprint is forgotten and the
+    // save is tried again later, in case the queue stays as it is. One retry
+    // waits at a time, longer after each failure in a row, so that a queue
+    // that cannot be saved, on a full or read-only volume, is not copied and
+    // written every few seconds for as long as OpenSCP runs.
+    persistenceWriter_.setFailureHandler([this](int failuresInARow) {
+        QMetaObject::invokeMethod(
+            this,
+            [this, failuresInARow] {
+                {
+                    std::lock_guard<std::mutex> lock(mtx_);
+                    lastPersistedFingerprint_.reset();
+                }
+                if (!persistenceRetryTimer_->isActive()) {
+                    persistenceRetryTimer_->start(std::min(
+                        kPersistenceRetryMs << std::min(failuresInARow - 1, 6),
+                        kPersistenceMaxRetryMs));
+                }
+            },
+            Qt::QueuedConnection);
+    });
     workerSlots_.reserve(kWorkerSlots);
     for (int index = 0; index < kWorkerSlots; ++index)
         workerSlots_.push_back(std::make_unique<WorkerSlot>(index));
@@ -279,6 +356,7 @@ void TransferManager::wakeCurrentSessionLocked(QVector<quint64> &changed) {
             setTaskStatusLocked(task, Status::Paused);
         } else {
             taskControls_.resume(task.taskId);
+            task.resumeHint = task.resumeHint || keepsPartialData(task);
             setTaskStatusLocked(task, Status::Queued);
         }
         changed.push_back(task.taskId);
@@ -288,6 +366,11 @@ void TransferManager::wakeCurrentSessionLocked(QVector<quint64> &changed) {
 QString TransferManager::sessionIdentity() const {
     std::lock_guard<std::mutex> lock(mtx_);
     return currentSessionKey_;
+}
+
+void TransferManager::setDownloadOrigin(const QString &originUrl) {
+    std::lock_guard<std::mutex> lock(mtx_);
+    downloadOrigin_ = originUrl;
 }
 
 void TransferManager::setConnectionFactory(ConnectionFactory openConnection,
@@ -556,8 +639,7 @@ void TransferManager::initializeConnectionStatusLocked(
 
 std::string TransferManager::destinationKey(const TransferTask &task,
                                             bool partial) const {
-    const QString path =
-        partial ? task.dst + QStringLiteral(".part") : task.dst;
+    const QString path = partial ? partialPathFor(task.dst) : task.dst;
     if (task.type == TransferTask::Type::Upload ||
         task.type == TransferTask::Type::CreateRemoteDirectory ||
         task.type == TransferTask::Type::DeleteRemoteFile ||
@@ -1115,16 +1197,29 @@ TransferManager::pickRunnableTaskLocked(std::size_t slotIndex) {
         return std::nullopt;
 
     TransferTask &task = *queueStore_.nodes()[*taskIndex];
-    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    markTaskRunningLocked(task, QDateTime::currentMSecsSinceEpoch());
+    return task;
+}
+
+void TransferManager::markTaskRunningLocked(TransferTask &task, qint64 nowMs) {
     setTaskStatusLocked(task, Status::Running);
     task.error.clear();
-    task.startedAtMs = now;
+    task.startedAtMs = nowMs;
     task.finishedAtMs = 0;
     task.nextRetryAtMs = 0;
     activeTaskIds_.insert(task.taskId);
     taskControls_.startRunning(task.taskId, task.speedLimitKBps);
     running_.fetch_add(1);
-    return task;
+}
+
+void TransferManager::releaseRunningTaskLocked(quint64 taskId) {
+    activeTaskIds_.erase(taskId);
+    taskControls_.finishRunning(taskId);
+    releaseTaskPathsLocked(taskId);
+    int running = running_.load();
+    while (running > 0 &&
+           !running_.compare_exchange_weak(running, running - 1)) {
+    }
 }
 
 void TransferManager::workerLoop(std::size_t slotIndex,
@@ -1153,8 +1248,14 @@ void TransferManager::workerLoop(std::size_t slotIndex,
             invalidateWorkerClient(slot);
             continue;
         }
+        {
+            // An interrupt for the previous task must not stop this one;
+            // interruptTask() reaches this one once activeTaskId names it.
+            std::lock_guard<std::mutex> lock(slot.clientMutex);
+            if (slot.client)
+                slot.client->clearInterrupt();
+        }
         slot.activeTaskId.store(task->taskId);
-        publishUpdated({task->taskId});
         executeTask(slot, std::move(*task), stopToken);
         slot.activeTaskId.store(0);
     }
@@ -1260,20 +1361,24 @@ void TransferManager::handleWorkerConnectionFailure(WorkerSlot &slot,
         if (!storedTask)
             return;
         const qint64 now = QDateTime::currentMSecsSinceEpoch();
+        // An automatic retry reconnects after an earlier attempt of this run
+        // wrote part of the file.
+        const bool resume =
+            storedTask->resumeHint || keepsPartialData(*storedTask);
         changed.push_back(taskId);
         if (generation != sessionGeneration_) {
             // A session change while connecting already decided the state
             // of the task unless it left it running.
             if (storedTask->status == Status::Running)
-                transitionToQueued(*storedTask, now, storedTask->resumeHint);
+                transitionToQueued(*storedTask, now, resume);
         } else if (otherWorkerConnected && !connectionSuspended_) {
             // The server takes fewer connections than there are workers. Keep
             // this slot idle for the session; a connected one takes the task.
             slot.parkedGeneration = generation;
-            transitionToQueued(*storedTask, now, storedTask->resumeHint);
+            transitionToQueued(*storedTask, now, resume);
         } else if (!connectionSuspended_ &&
                    ++consecutiveConnectionFailures_ < kConnectionFailureLimit) {
-            transitionToQueued(*storedTask, now, storedTask->resumeHint);
+            transitionToQueued(*storedTask, now, resume);
         } else {
             suspended = !connectionSuspended_;
             connectionSuspended_ = true;
@@ -1754,8 +1859,8 @@ void TransferManager::removeTasks(const QVector<quint64> &taskIds,
             if (reserved) {
                 std::string cleanupError;
                 (void)openscp::localfiles::removeLocalPath(
-                    (taskNode->dst + QStringLiteral(".part")).toStdString(),
-                    false, cleanupError);
+                    partialPathFor(taskNode->dst).toStdString(), false,
+                    cleanupError);
                 {
                     std::lock_guard<std::mutex> lock(mtx_);
                     releaseTaskPathsLocked(taskNode->taskId);
@@ -1767,6 +1872,10 @@ void TransferManager::removeTasks(const QVector<quint64> &taskIds,
     publishRemoved(removedIds);
     if (!removePartialData)
         return;
+    // Remote cleanup must stay off the UI thread. Represent it as normal
+    // persistent queue operations so each can wait for the matching session,
+    // queued together so that thousands of uploads are one addition.
+    QVector<TransferRequest> cleanups;
     for (const auto &taskNode : removed) {
         const TransferTask &task = *taskNode;
         if (task.type != TransferTask::Type::Upload ||
@@ -1776,14 +1885,17 @@ void TransferManager::removeTasks(const QVector<quint64> &taskIds,
                                          task.dst)) {
             continue;
         }
-        // Remote cleanup must stay off the UI thread. Represent it as a normal
-        // persistent queue operation so it can wait for the matching session.
         TransferBatchOptions cleanup;
         cleanup.batchId = task.batchId;
         cleanup.sessionKey = task.sessionKey;
         cleanup.conflictPolicy = Policy::Skip;
-        enqueueRemoteDelete(task.dst + QStringLiteral(".part"), false, cleanup);
+        cleanups.push_back({TransferTask::Type::DeleteRemoteFile,
+                            {},
+                            partialPathFor(task.dst),
+                            cleanup,
+                            -1});
     }
+    enqueueTasks(cleanups);
 }
 
 void TransferManager::removeInactiveTasks(
@@ -2278,7 +2390,11 @@ TransferManager::PrecheckOutcome TransferManager::precheckTask(
                         return PrecheckOutcome::Error;
                     publishUpdated({task.taskId});
                 }
-                resume = decision.policy == Policy::Resume;
+                // Overwriting the destination still continues the partial
+                // file that an earlier run of this task wrote.
+                resume =
+                    decision.policy == Policy::Resume ||
+                    (decision.policy == Policy::Overwrite && task.resumeHint);
             }
 
             const QString parent = QFileInfo(task.dst).path();
@@ -2358,8 +2474,42 @@ TransferManager::PrecheckOutcome TransferManager::precheckTask(
             }
         }
     } else {
+        std::string directoryError;
+        if (!openscp::localfiles::ensureLocalDirectories(
+                QFileInfo(task.dst).dir().absolutePath().toStdString(),
+                directoryError)) {
+            err = QCoreApplication::translate(
+                      "TransferManager",
+                      "Could not create local destination directory")
+                      .toUtf8()
+                      .toStdString() +
+                  ": " + directoryError;
+            return PrecheckOutcome::LocalError;
+        }
+        // Checked once the folders exist, because another download may have
+        // just created one of them under its own spelling.
+        if (const QString folder = folderUnderAnotherName(task);
+            !folder.isEmpty()) {
+            err = QCoreApplication::translate(
+                      "TransferManager",
+                      "The folder «%1» would merge with a folder whose name "
+                      "differs only in letter case, which this disk treats "
+                      "as the same name.")
+                      .arg(folder)
+                      .toUtf8()
+                      .toStdString();
+            return PrecheckOutcome::LocalError;
+        }
         const QFileInfo localInfo(task.dst);
-        if (localInfo.exists()) {
+        if (existsUnderAnotherName(localInfo)) {
+            // Two remote names that differ only in case meet in one local
+            // file on Windows and macOS. Whatever the policy, the download
+            // takes a free name, so that neither file replaces the other.
+            if (!chooseRenamedDestination(task, workerClient, err))
+                return PrecheckOutcome::LocalError;
+            publishUpdated({task.taskId});
+            resume = false;
+        } else if (localInfo.exists()) {
             openscp::FileInfo remoteInfo{};
             std::string statError;
             const bool hasRemoteInfo =
@@ -2392,22 +2542,11 @@ TransferManager::PrecheckOutcome TransferManager::precheckTask(
                 return PrecheckOutcome::Skipped;
             if (decision.policy == Policy::Rename) {
                 if (!chooseRenamedDestination(task, workerClient, err))
-                    return PrecheckOutcome::Error;
+                    return PrecheckOutcome::LocalError;
                 publishUpdated({task.taskId});
             }
-            resume = decision.policy == Policy::Resume;
-        }
-        std::string directoryError;
-        if (!openscp::localfiles::ensureLocalDirectories(
-                QFileInfo(task.dst).dir().absolutePath().toStdString(),
-                directoryError)) {
-            err = QCoreApplication::translate(
-                      "TransferManager",
-                      "Could not create local destination directory")
-                      .toUtf8()
-                      .toStdString() +
-                  ": " + directoryError;
-            return PrecheckOutcome::Error;
+            resume = decision.policy == Policy::Resume ||
+                     (decision.policy == Policy::Overwrite && task.resumeHint);
         }
     }
     const bool canResume = task.type == TransferTask::Type::Upload
@@ -2480,12 +2619,18 @@ bool TransferManager::runTransferAttempt(
         updateProgress(taskId, done, total, latest.measuredKBps, etaSeconds);
         publishProgress({taskId});
     };
+    const QString origin = [this] {
+        std::lock_guard<std::mutex> lock(mtx_);
+        return downloadOrigin_;
+    }();
     const bool succeeded =
         TransferExecutor::run(task, workerClient, resume, err, callbacks);
     if (latest.unstored) {
         updateProgress(task.taskId, latest.done, latest.total,
                        latest.measuredKBps, latest.etaSeconds);
     }
+    if (succeeded && task.type == TransferTask::Type::Download)
+        openscpui::markDownloadedFile(task.dst, origin);
     return succeeded;
 }
 
@@ -2525,12 +2670,22 @@ void TransferManager::executeTask(WorkerSlot &slot, TransferTask task,
         else if (storedTask->status != Status::WaitingForConnection)
             transitionToPaused(*storedTask);
     };
-    auto markError = [&](const std::string &error) {
+    // A retry continues the partial data of the run, unless the data is what
+    // failed. A run that the connection stopped before it moved anything
+    // keeps the partial data of an earlier one; after any other failure the
+    // next run starts over, since resuming may be what failed, as with a .part
+    // larger than the file it continues.
+    auto markError = [&](const std::string &error, bool resumable,
+                         bool connectionLost) {
         std::lock_guard<std::mutex> lock(mtx_);
         TransferTask *storedTask = taskForIdLocked(task.taskId);
-        if (storedTask)
+        if (storedTask) {
             transitionToError(*storedTask, error,
                               QDateTime::currentMSecsSinceEpoch());
+            storedTask->resumeHint =
+                resumable && (keepsPartialData(*storedTask) ||
+                              (connectionLost && storedTask->resumeHint));
+        }
     };
 
     std::shared_ptr<openscp::RemoteClient> client;
@@ -2623,18 +2778,26 @@ void TransferManager::executeTask(WorkerSlot &slot, TransferTask task,
                 finish();
                 return;
             }
-            failed = outcome == PrecheckOutcome::Error;
+            failed = outcome == PrecheckOutcome::Error ||
+                     outcome == PrecheckOutcome::LocalError;
             prechecked = !failed;
             if (failed && client)
-                operationError = client->lastOperationError();
+                operationError = outcome == PrecheckOutcome::LocalError
+                                     ? localFailure(error)
+                                     : client->lastOperationError();
         }
 
         if (!failed && task.phase == TransferPhase::Transfer) {
             transferStarted = QDateTime::currentMSecsSinceEpoch();
             failed = !runTransferAttempt(task, client, slot.taskSignals, resume,
                                          error);
+            const bool localTask =
+                task.type == TransferTask::Type::CreateLocalDirectory ||
+                task.type == TransferTask::Type::DeleteLocalFile ||
+                task.type == TransferTask::Type::DeleteLocalDirectory;
             if (failed)
-                operationError = client->lastOperationError();
+                operationError = localTask ? localFailure(error)
+                                           : client->lastOperationError();
             if (failed &&
                 (task.type == TransferTask::Type::DeleteRemoteFile ||
                  task.type == TransferTask::Type::DeleteRemoteDirectory) &&
@@ -2802,7 +2965,9 @@ void TransferManager::executeTask(WorkerSlot &slot, TransferTask task,
             attempt < maxAutomaticAttempts &&
             shouldRetryError(operationError, error, retryAfterMs);
         if (!retryable) {
-            if (isTransportFailure(operationError, error))
+            const bool connectionLost =
+                isTransportFailure(operationError, error);
+            if (connectionLost)
                 invalidateWorkerClient(slot);
             const std::string finalError =
                 error.empty() ? QCoreApplication::translate("TransferManager",
@@ -2810,7 +2975,10 @@ void TransferManager::executeTask(WorkerSlot &slot, TransferTask task,
                                     .toUtf8()
                                     .toStdString()
                               : error;
-            markError(finalError);
+            markError(finalError,
+                      operationError.kind !=
+                          openscp::RemoteErrorKind::Integrity,
+                      connectionLost);
             publishUpdated({task.taskId});
             finish();
             return;
@@ -2858,7 +3026,8 @@ void TransferManager::executeTask(WorkerSlot &slot, TransferTask task,
     markError(QCoreApplication::translate(
                   "TransferManager", "Transfer failed after all retry attempts")
                   .toUtf8()
-                  .toStdString());
+                  .toStdString(),
+              true, true);
     publishUpdated({task.taskId});
     finish();
 }
@@ -2963,17 +3132,11 @@ void TransferManager::finishWorkerTask(quint64 taskId, qint64 precheckMs,
                 requeued = true;
             }
         }
-        activeTaskIds_.erase(taskId);
-        taskControls_.finishRunning(taskId);
-        releaseTaskPathsLocked(taskId);
+        releaseRunningTaskLocked(taskId);
         if (finalStatus == Status::Error || finalStatus == Status::Canceled ||
             finalStatus == Status::Warning) {
             dependencySkipped = skipDependentsOfFailedLocked(
                 taskId, QDateTime::currentMSecsSinceEpoch());
-        }
-        int running = running_.load();
-        while (running > 0 &&
-               !running_.compare_exchange_weak(running, running - 1)) {
         }
         removed = pruneTerminalHistoryLocked();
     }
@@ -3077,21 +3240,31 @@ void TransferManager::restartPersistenceTimer() {
     }
     // Waiting for a pause in the changes, unless the deadline has passed and
     // the save that is already due should just happen.
-    if (now - persistencePendingSinceMs_ < kPersistenceDeadlineMs)
+    const qint64 deadlineMs = std::clamp<qint64>(
+        persistedTaskCount_, kPersistenceDeadlineMs, kPersistenceMaxDeadlineMs);
+    if (now - persistencePendingSinceMs_ < deadlineMs)
         persistenceTimer_->start();
 }
 
 void TransferManager::writeQueueSnapshot() {
     // The writer thread serializes and writes, so this only copies.
-    if (auto snapshot = persistedSnapshot(true))
-        persistenceWriter_.save(std::move(*snapshot));
+    auto snapshot = persistedSnapshot(true);
+    if (!snapshot)
+        return;
+    {
+        std::lock_guard<std::mutex> lock(persistenceMutex_);
+        persistedTaskCount_ = snapshot->size();
+    }
+    persistenceWriter_.save(std::move(*snapshot));
 }
 
 bool TransferManager::enablePersistence(const QString &path) {
     QString resolved = path;
     if (resolved.isEmpty()) {
-        const QString dataDir =
-            QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+        // The queue names this computer's paths, so on Windows it stays out
+        // of the roaming profile; elsewhere both locations are the same.
+        const QString dataDir = QStandardPaths::writableLocation(
+            QStandardPaths::AppLocalDataLocation);
         if (dataDir.isEmpty()) {
             emit persistenceWarning(
                 tr("The transfer queue storage directory is unavailable."));

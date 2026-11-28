@@ -11,6 +11,7 @@
 namespace {
 
 using openscpui::detail::collapseTargetsToDirectories;
+using openscpui::detail::groupRevealedFilesByFolder;
 using openscpui::detail::PathActionKind;
 using openscpui::detail::planRevealBatch;
 using openscpui::detail::resolveRevealTarget;
@@ -185,6 +186,32 @@ OPENSCP_TEST(testBatchKeepsUnrelatedFolders, test) {
     const auto planned = planRevealBatch({filePath, siblingPath});
     test.check(planned.size() == 2,
                "an unrelated directory should survive the batch plan");
+}
+
+OPENSCP_TEST(testRevealedFilesAreGroupedByFolder, test) {
+    QTemporaryDir root;
+    test.check(root.isValid(), "the fixture directory should be created");
+    QDir rootDir(root.path());
+    test.check(rootDir.mkpath(QStringLiteral("other")),
+               "the second folder should be created");
+    const QString first = rootDir.filePath("one.txt");
+    const QString elsewhere = rootDir.filePath("other/three.txt");
+    const QString second = rootDir.filePath("two.txt");
+    test.check(writeFile(first) && writeFile(elsewhere) && writeFile(second),
+               "the fixture files should be created");
+
+    const auto groups = groupRevealedFilesByFolder(
+        planRevealBatch({first, elsewhere, second, rootDir.filePath("other")}));
+    test.check(groups.size() == 2,
+               "each folder should be shown once, with all of its files");
+    test.check(groups.size() == 2 &&
+                   groups[0].folder == QFileInfo(first).absolutePath() &&
+                   groups[0].files ==
+                       QStringList{QFileInfo(first).absoluteFilePath(),
+                                   QFileInfo(second).absoluteFilePath()} &&
+                   groups[1].files ==
+                       QStringList{QFileInfo(elsewhere).absoluteFilePath()},
+               "files should keep their order within each folder");
 }
 
 OPENSCP_TEST(testCollapseGroupsFilesByParentDirectory, test) {

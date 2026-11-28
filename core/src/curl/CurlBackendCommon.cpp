@@ -24,7 +24,10 @@
 #include <utility>
 
 #ifdef _WIN32
-#include <io.h>
+#include "common/Win32Text.hpp"
+#include "curl/WindowsServerTrust_win.hpp"
+
+#include <windows.h>
 #else
 #include <unistd.h>
 #endif
@@ -35,17 +38,36 @@ namespace {
 std::mutex activeDestinationMutex;
 std::unordered_set<std::string> activeDestinations;
 
-std::string localPartialPath(const std::string &destination) {
-    return destination + ".part";
-}
-
 std::string localDestinationKey(const std::string &path) {
+#ifdef _WIN32
+    // The full path, with the letter case NTFS ignores folded, from UTF-16:
+    // std::filesystem would read the UTF-8 bytes in the system code page and
+    // throw on a sequence that page does not have.
+    std::wstring wide;
+    if (!win32::toWidePath(path, wide))
+        return std::string("local:") + path;
+    const DWORD length = ::GetFullPathNameW(wide.c_str(), 0, nullptr, nullptr);
+    if (length == 0)
+        return std::string("local:") + path;
+    std::wstring full(length, L'\0');
+    const DWORD written =
+        ::GetFullPathNameW(wide.c_str(), length, full.data(), nullptr);
+    full.resize(written < length ? written : 0);
+    if (full.empty() ||
+        ::LCMapStringEx(LOCALE_NAME_INVARIANT, LCMAP_UPPERCASE, full.data(),
+                        static_cast<int>(full.size()), full.data(),
+                        static_cast<int>(full.size()), nullptr, nullptr,
+                        0) == 0)
+        return std::string("local:") + path;
+    return std::string("local:") + win32::toUtf8(full);
+#else
     std::error_code pathError;
     const std::filesystem::path absolutePath =
         std::filesystem::absolute(std::filesystem::path(path), pathError);
     if (pathError)
         return std::string("local:") + path;
     return std::string("local:") + absolutePath.lexically_normal().string();
+#endif
 }
 
 size_t readFileCallback(char *ptr, size_t size, size_t nmemb, void *userdata) {
@@ -136,17 +158,11 @@ void CurlEasySession::reset() noexcept {
 
 CurlClientState::Operation::Operation(CurlClientState &owner)
     : owner_(&owner), lock_(owner.operationMutex_) {
-    owner_->interrupted_.store(false);
 }
 
 CurlClientState::Operation::Operation(Operation &&other) noexcept
     : owner_(std::exchange(other.owner_, nullptr)),
       lock_(std::move(other.lock_)) {
-}
-
-CurlClientState::Operation::~Operation() {
-    if (owner_)
-        owner_->interrupted_.store(false);
 }
 
 CurlClientState::ConnectedOperation::ConnectedOperation(
@@ -246,6 +262,10 @@ void CurlClientState::requestInterrupt() noexcept {
     interrupted_.store(true);
 }
 
+void CurlClientState::clearInterrupt() noexcept {
+    interrupted_.store(false);
+}
+
 bool CurlClientState::isConnected() const {
     std::lock_guard<std::mutex> lock(stateMutex_);
     return connected_;
@@ -259,6 +279,15 @@ CurlClientState::snapshot(const Operation &operation) const {
     if (!connected_)
         return {};
     return {options_, session_.get(), commandRoot_};
+}
+
+bool appendToCurlSlist(CurlSlist &list, const std::string &item) {
+    curl_slist *head = curl_slist_append(list.get(), item.c_str());
+    if (!head)
+        return false;
+    (void)list.release();
+    list.reset(head);
+    return true;
 }
 
 bool rejectInterrupted(const std::atomic<bool> *interrupted, std::string &err,
@@ -504,16 +533,16 @@ std::string encodeFtpUrlPath(std::string_view logicalPath, bool directory) {
 std::FILE *openFileForUpload(const std::string &path, std::uint64_t &fileSize,
                              std::string &err) {
     fileSize = 0;
-    try {
-        fileSize = std::filesystem::file_size(path);
-    } catch (...) {
+    UniqueFile file(openLocalFile(path, "rb"));
+    if (!file) {
+        err = "Could not open local file for reading.";
+        return nullptr;
+    }
+    if (!localFileSize(file.get(), fileSize)) {
         err = "Could not determine local file size.";
         return nullptr;
     }
-    std::FILE *file = std::fopen(path.c_str(), "rb");
-    if (!file)
-        err = "Could not open local file for reading.";
-    return file;
+    return file.release();
 }
 
 RemoteError errorFromCurl(CURLcode code, std::string message, long responseCode,
@@ -597,10 +626,20 @@ RemoteError errorFromCurl(CURLcode code, std::string message, long responseCode,
 CURLcode performWithErrorDetail(CURL *curl, std::string &detail) {
     char buffer[CURL_ERROR_SIZE] = {};
     (void)curl_easy_setopt(curl, CURLOPT_ERRORBUFFER, buffer);
-    const CURLcode code = curl_easy_perform(curl);
+    CURLcode code = curl_easy_perform(curl);
     // The handle outlives this buffer.
     (void)curl_easy_setopt(curl, CURLOPT_ERRORBUFFER, nullptr);
     detail = buffer;
+    // libcurl reports a proxy that refused the tunnel as a connection that
+    // failed, or before 8.20, as on Ubuntu 22.04 and 24.04, as a receive
+    // error; either would be retried as a network outage. A 407 asks for
+    // other proxy credentials, which no retry brings.
+    long proxyResponse = 0;
+    if ((code == CURLE_COULDNT_CONNECT || code == CURLE_RECV_ERROR) &&
+        curl_easy_getinfo(curl, CURLINFO_HTTP_CONNECTCODE, &proxyResponse) ==
+            CURLE_OK &&
+        proxyResponse == 407)
+        code = CURLE_LOGIN_DENIED;
     return code;
 }
 
@@ -752,6 +791,14 @@ bool configureProxy(CURL *curl, const SessionOptions &opt,
               " proxy endpoint.";
         return false;
     }
+    // Without a list of its own, libcurl reads no_proxy and NO_PROXY and
+    // connects directly to the hosts they name, even with the proxy above.
+    // An empty list sends every host through the proxy, as SFTP does.
+    if (curl_easy_setopt(curl, CURLOPT_NOPROXY, "") != CURLE_OK) {
+        err = std::string("Could not configure ") + backendLabel +
+              " proxy for every host.";
+        return false;
+    }
 
     const ProxyType normalizedProxyType = normalizeProxyType(opt.proxy_type);
     // Map app-level proxy enum to libcurl proxy transport.
@@ -791,7 +838,9 @@ bool configureProxy(CURL *curl, const SessionOptions &opt,
         }
         // libcurl would send the password in Basic, in clear, to any HTTP
         // proxy. ANY asks the proxy first and picks the safest method it
-        // offers, so NTLM, Negotiate and Digest proxies work too.
+        // offers among libcurl's: Digest, and Negotiate (Kerberos, or NTLM
+        // within it) where libcurl has it, as the Windows builds do through
+        // SSPI. libcurl leaves NTLM on its own out by default.
         if (normalizedProxyType == ProxyType::HttpConnect &&
             curl_easy_setopt(curl, CURLOPT_PROXYAUTH, CURLAUTH_ANY) !=
                 CURLE_OK) {
@@ -837,13 +886,44 @@ bool configureTlsPolicy(CURL *curl, bool verifyPeer,
         err = verificationError;
         return false;
     }
-    if (caCertPath && !caCertPath->empty()) {
-        if (curl_easy_setopt(curl, CURLOPT_CAINFO, caCertPath->c_str()) !=
-            CURLE_OK) {
+    const bool chosenCa = caCertPath && !caCertPath->empty();
+    if (chosenCa && curl_easy_setopt(curl, CURLOPT_CAINFO,
+                                     caCertPath->c_str()) != CURLE_OK) {
+        err = caPathError;
+        return false;
+    }
+#ifdef __linux__
+    // libcurl's default CA file is fixed when libcurl is built. The AppImage
+    // bundles Rocky Linux's, whose path Debian and Ubuntu do not have, so name
+    // the bundle of the system it runs on.
+    if (verifyPeer && !chosenCa) {
+        static const std::string systemBundle = firstExistingFile({
+            "/etc/ssl/certs/ca-certificates.crt",                // Debian
+            "/etc/pki/tls/certs/ca-bundle.crt",                  // Fedora
+            "/etc/ssl/ca-bundle.pem",                            // openSUSE
+            "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem", // RHEL
+            "/etc/ssl/cert.pem",                                 // Alpine
+        });
+        if (!systemBundle.empty() &&
+            curl_easy_setopt(curl, CURLOPT_CAINFO, systemBundle.c_str()) !=
+                CURLE_OK) {
             err = caPathError;
             return false;
         }
     }
+#endif
+#ifdef _WIN32
+    // OpenSSL has no trust store of its own on Windows, so Windows itself
+    // checks the server, as it does for its own connections. A chosen CA file
+    // stays the only one trusted.
+    const curl_ssl_ctx_callback windowsTrust =
+        verifyPeer && !chosenCa ? &useWindowsServerTrust : nullptr;
+    if (curl_easy_setopt(curl, CURLOPT_SSL_CTX_FUNCTION, windowsTrust) !=
+        CURLE_OK) {
+        err = verificationError;
+        return false;
+    }
+#endif
     if (pinnedPublicKey && !pinnedPublicKey->empty()) {
         if (curl_easy_setopt(curl, CURLOPT_PINNEDPUBLICKEY,
                              pinnedPublicKey->c_str()) != CURLE_OK) {
@@ -852,6 +932,16 @@ bool configureTlsPolicy(CURL *curl, bool verifyPeer,
         }
     }
     return true;
+}
+
+std::string firstExistingFile(std::initializer_list<std::string_view> paths) {
+    for (const std::string_view path : paths) {
+        std::error_code error;
+        if (std::filesystem::is_regular_file(std::filesystem::path(path),
+                                             error))
+            return std::string(path);
+    }
+    return {};
 }
 
 bool publicKeyPinFromPem(std::string_view pem, std::string &pin) {
@@ -1163,7 +1253,7 @@ bool downloadToLocalFile(CURL *curl, const std::string &destination,
                          const CurlTransportErrorMapper &transportErrorMapper,
                          const CurlResponseErrorMapper &responseErrorMapper,
                          RemoteError &failure, std::string &err) {
-    const std::string partial = localPartialPath(destination);
+    const std::string partial = partialPathFor(destination);
     ActiveDestinationLease destinationLease(localDestinationKey(destination));
     ActiveDestinationLease partialLease(localDestinationKey(partial));
     if (!destinationLease.acquired() || !partialLease.acquired()) {
@@ -1232,6 +1322,7 @@ bool downloadToLocalFile(CURL *curl, const std::string &destination,
             static_cast<std::int64_t>(CURLE_ABORTED_BY_CALLBACK));
         return false;
     }
+    localfiles::applyDownloadPermissions(partial, destination, std::nullopt);
     if (!localfiles::atomicReplace(partial, destination, err, durability)) {
         failure = makeRemoteError(RemoteErrorKind::LocalIo, err, errno);
         return false;

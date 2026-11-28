@@ -1,3 +1,4 @@
+#include "QtTestSupport.hpp"
 #include "TestHarness.hpp"
 #include "logic/persistence/SiteCredentialRepository.hpp"
 
@@ -12,6 +13,17 @@
 #include <memory>
 
 namespace {
+
+// Secrets reach the store as SecureString, which wipes its memory; a QString
+// overload would invite passwords kept in strings that nothing wipes.
+template <typename Value>
+constexpr bool storesSecretsFrom =
+    requires(SecretStore store, const QString &key, const Value &value) {
+        store.setSecret(key, value);
+    };
+static_assert(storesSecretsFrom<openscp::SecureString>);
+static_assert(!storesSecretsFrom<QString>,
+              "secrets should never reach the store as a QString");
 
 struct FakeSecretBackend {
     QHash<QString, openscp::SecureString> values;
@@ -50,7 +62,7 @@ struct FakeSecretBackend {
                     return {deleteStatus,
                             QStringLiteral("simulated delete failure")};
                 }
-                const bool existed = values.remove(key) > 0;
+                const bool existed = values.remove(key);
                 return {existed ? SecretStore::DeleteStatus::Removed
                                 : SecretStore::DeleteStatus::Missing,
                         {}};
@@ -220,6 +232,17 @@ OPENSCP_TEST(testWindowsDpapiSecretRoundTrip, test) {
 } // namespace
 
 int main(int argc, char **argv) {
+    QCoreApplication application(argc, argv);
+    QCoreApplication::setOrganizationName(QStringLiteral("OpenSCP-tests"));
+    QCoreApplication::setApplicationName(
+        QStringLiteral("site-credential-repository-tests"));
+    // The Windows DPAPI secrets live in settings, which must not be the
+    // user's own.
+    openscp::testsupport::IsolatedSettings settingsRoot;
+    if (!settingsRoot.isValid()) {
+        std::cerr << "[FAIL] could not create isolated settings directory\n";
+        return 1;
+    }
     openscp::test::TestHarness harness("site credential repository");
-    return harness.runWithApplication<QCoreApplication>(argc, argv);
+    return harness.run(argc, argv);
 }

@@ -2,6 +2,7 @@
 
 #include <QMessageBox>
 
+class QProgressDialog;
 class QString;
 class QWidget;
 
@@ -33,4 +34,8 @@ QMessageBox::StandardButton question(
     QWidget *parent, const QString &title, const QString &text,
     QMessageBox::StandardButtons buttons = QMessageBox::Yes | QMessageBox::No,
     QMessageBox::StandardButton defaultButton = QMessageBox::No);
+
+// Makes a progress dialog show its label as written: the label names remote
+// paths, and a server could word one as markup.
+void showLabelAsText(QProgressDialog &dialog);
 } // namespace UiAlerts

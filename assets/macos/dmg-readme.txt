@@ -14,9 +14,6 @@ Opening OpenSCP for the first time
 4. Confirm when macOS asks a second time. OpenSCP starts normally from
    then on, including after a restart.
 
-On macOS 12 and 13 the same setting lives in System Preferences, under
-Security & Privacy, in the General tab.
-
 If you prefer the terminal, this does the same thing in one step:
 
     xattr -dr com.apple.quarantine /Applications/OpenSCP.app

@@ -14,9 +14,11 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <set>
 #include <string>
 #include <thread>
 #include <vector>
@@ -100,6 +102,9 @@ class ControllerFakeClient final : public openscp::RemoteClient {
         state_->wake.notify_all();
     }
 
+    // Like the curl backends, an interrupt lasts until it is cleared.
+    void clearInterrupt() override { state_->interrupted.store(false); }
+
     bool isConnected() const override { return connected_.load(); }
 
     bool list(const std::string &remotePath,
@@ -162,14 +167,19 @@ class ControllerFakeClient final : public openscp::RemoteClient {
             out = {
                 {"link-target.txt", false, 1, true, 0, 0100644u, 1, 1},
             };
+        } else if (remotePath == "/many") {
+            out.clear();
+            for (int index = 0; index < 500; ++index) {
+                out.push_back({"f" + std::to_string(index), false, 1, true, 0,
+                               0100644u, 1, 1});
+            }
         } else if (remotePath == "/unsafe") {
             out = {
                 {"safe.txt", false, 4, true, 0, 0100644u, 1, 1},
                 {".", true, 0, false, 0, 0040755u, 1, 1},
                 {"..", true, 0, false, 0, 0040755u, 1, 1},
                 {"nested/escape.txt", false, 1, true, 0, 0100644u, 1, 1},
-                {std::string("bad-") + char(0xff), false, 1, true, 0, 0100644u,
-                 1, 1},
+                {std::string("bad-\xff"), false, 1, true, 0, 0100644u, 1, 1},
             };
         } else {
             out.clear();
@@ -543,6 +553,45 @@ OPENSCP_TEST(testRecursiveDeleteRemovesLinksWithoutFollowingThem, test) {
                "a recursive delete must never follow a link");
 }
 
+OPENSCP_TEST(testRecursiveMutationsThrottleTheirProgress, test) {
+    // A recursive deletion or chmod posted one progress event per entry, so a
+    // fast server filled the UI's event queue to show nothing useful.
+    RemoteOperationController controller;
+    const auto state = std::make_shared<FakeState>();
+    std::map<RemoteOperationController::JobId, int> progressEvents;
+    std::set<RemoteOperationController::JobId> finished;
+    QObject::connect(&controller, &RemoteOperationController::jobProgress,
+                     &controller,
+                     [&](const RemoteOperationController::Progress &progress) {
+                         ++progressEvents[progress.job.id];
+                     });
+    QObject::connect(
+        &controller, &RemoteOperationController::jobFinished, &controller,
+        [&](const RemoteOperationController::Completion &completion) {
+            finished.insert(completion.result.job.id);
+        });
+    controller.installSession(makeConnectedClient(state));
+    RemoteOperationController::DeleteRequest deletion;
+    deletion.path = QStringLiteral("/many");
+    deletion.kind = RemoteOperationController::DeleteKind::Directory;
+    deletion.recursive = true;
+    RemoteOperationController::ChmodRequest permissions;
+    permissions.path = QStringLiteral("/many");
+    permissions.mode = 0755;
+    permissions.recursive = true;
+    const auto deleteJob = controller.submit(deletion);
+    const auto chmodJob = controller.submit(permissions);
+    test.check(spinUntil([&] {
+                   return finished.contains(deleteJob) &&
+                          finished.contains(chmodJob);
+               }),
+               "both recursive operations should finish");
+    test.check(progressEvents[deleteJob] < 50 && progressEvents[chmodJob] < 50,
+               "500 entries should not post one progress event each: " +
+                   std::to_string(progressEvents[deleteJob]) + " and " +
+                   std::to_string(progressEvents[chmodJob]));
+}
+
 OPENSCP_TEST(testRecursiveMutationsRejectUnsafeNames, test) {
     RemoteOperationController controller;
     const auto state = std::make_shared<FakeState>();
@@ -802,6 +851,7 @@ OPENSCP_TEST(testTraversalPauseProvidesBackpressure, test) {
     RemoteOperationController::JobId traversalJob = 0;
     bool slowStarted = false;
     bool slowFinished = false;
+    bool traversalStarted = false;
     bool traversalFinished = false;
 
     QObject::connect(&controller, &RemoteOperationController::jobStarted,
@@ -809,6 +859,8 @@ OPENSCP_TEST(testTraversalPauseProvidesBackpressure, test) {
                      [&](const RemoteOperationController::JobKey &job) {
                          if (job.id == slowJob)
                              slowStarted = true;
+                         if (job.id == traversalJob)
+                             traversalStarted = true;
                      });
     QObject::connect(
         &controller, &RemoteOperationController::jobFinished, &controller,
@@ -836,6 +888,10 @@ OPENSCP_TEST(testTraversalPauseProvidesBackpressure, test) {
     controller.cancel(slowJob);
     test.check(spinUntil([&] { return slowFinished; }),
                "blocker should finish after cancellation");
+    // The window counts only once the traversal runs, so a late start
+    // cannot pass the check without it.
+    test.check(spinUntil([&] { return traversalStarted; }),
+               "the paused traversal should start");
 
     QElapsedTimer pauseWindow;
     pauseWindow.start();
@@ -1174,6 +1230,27 @@ OPENSCP_TEST(testReplacedListingKeepsTheConnection, test) {
                "the replaced listing should report cancellation");
     test.check(opened.load() == 0 && state->interruptCalls.load() == 0,
                "a replaced listing should keep the control connection");
+}
+
+OPENSCP_TEST(testLeftoverInterruptDoesNotStopTheNextJob, test) {
+    // A cancel that reaches a job just as it ends leaves its interrupt behind;
+    // the next job must not inherit it.
+    RemoteOperationController controller;
+    const auto state = std::make_shared<FakeState>();
+    std::optional<RemoteOperationController::ListResult> result;
+    QObject::connect(&controller, &RemoteOperationController::listCompleted,
+                     &controller,
+                     [&](const RemoteOperationController::ListResult &done) {
+                         result = done;
+                     });
+    controller.installSession(makeConnectedClient(state));
+    state->interrupted.store(true);
+    state->releaseSlow.store(true);
+    controller.submit(RemoteOperationController::ListRequest{"/slow", true});
+    test.check(spinUntil([&] { return result.has_value(); }) &&
+                   result->result.outcome ==
+                       RemoteOperationController::Outcome::Succeeded,
+               "a listing after a leftover interrupt should succeed");
 }
 
 OPENSCP_TEST(testRefusedReopenIsNotRetried, test) {

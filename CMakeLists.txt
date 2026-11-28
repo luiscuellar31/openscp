@@ -11,28 +11,12 @@ if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Darwin")
     endif()
 endif()
 
-project(OpenSCP LANGUAGES CXX VERSION 1.2.0)
+project(OpenSCP LANGUAGES CXX VERSION 1.3.0)
 
 if(APPLE)
     enable_language(OBJCXX)
     set(CMAKE_OBJCXX_STANDARD 20)
     set(CMAKE_OBJCXX_STANDARD_REQUIRED ON)
-endif()
-
-if(WIN32)
-    option(OPENSCP_ENABLE_EXPERIMENTAL_WINDOWS_PORT
-        "Allow configuration of the unsupported Windows port scaffold"
-        OFF)
-    if(NOT OPENSCP_ENABLE_EXPERIMENTAL_WINDOWS_PORT)
-        message(FATAL_ERROR
-            "OpenSCP does not currently support Windows. The modular port "
-            "is intentionally gated to prevent accidental release builds. "
-            "Port developers may opt in with "
-            "-DOPENSCP_ENABLE_EXPERIMENTAL_WINDOWS_PORT=ON.")
-    endif()
-    message(WARNING
-        "Experimental Windows scaffold enabled: this configuration is not "
-        "a supported OpenSCP release target.")
 endif()
 
 set(CMAKE_CXX_STANDARD 20)
@@ -145,6 +129,35 @@ if(OPENSCP_BUILD_FUZZERS)
     endif()
 endif()
 
+add_library(openscp_project_platform INTERFACE)
+if(WIN32)
+    # Windows 10 1809 is the oldest release Qt 6 and OpenSCP support. The
+    # Unicode definitions select the UTF-16 Win32 API in every target, not
+    # only in those that link Qt, which defines them too.
+    target_compile_definitions(openscp_project_platform INTERFACE
+        _WIN32_WINNT=0x0A00
+        WINVER=0x0A00
+        NTDDI_VERSION=0x0A000006
+        WIN32_LEAN_AND_MEAN
+        NOMINMAX
+        UNICODE
+        _UNICODE
+    )
+endif()
+if(MSVC)
+    # Sources are UTF-8. Without /utf-8, MSVC reads them, and encodes narrow
+    # string literals, in the system code page.
+    target_compile_options(openscp_project_platform INTERFACE
+        /utf-8
+        /Zc:__cplusplus
+    )
+    # Qt defines it for its users too. The standard C functions it flags are
+    # portable; the code avoids them where Windows needs another API, such as
+    # fopen() for paths that are not ASCII.
+    target_compile_definitions(openscp_project_platform INTERFACE
+        _CRT_SECURE_NO_WARNINGS)
+endif()
+
 add_library(openscp_project_warnings INTERFACE)
 if(MSVC)
     target_compile_options(openscp_project_warnings INTERFACE
@@ -176,11 +189,20 @@ endif()
 
 add_library(openscp_project_hardening INTERFACE)
 if(MSVC)
-    target_compile_options(openscp_project_hardening INTERFACE /GS)
+    target_compile_options(openscp_project_hardening INTERFACE
+        /GS
+        /guard:cf
+    )
     target_link_options(openscp_project_hardening INTERFACE
         /DYNAMICBASE
+        /HIGHENTROPYVA
         /NXCOMPAT
+        /GUARD:CF
     )
+    # CET shadow stacks exist only on x64 processors.
+    if(CMAKE_CXX_COMPILER_ARCHITECTURE_ID STREQUAL "x64")
+        target_link_options(openscp_project_hardening INTERFACE /CETCOMPAT)
+    endif()
 elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
     set(OPENSCP_FORTIFY_SOURCE_LEVEL "AUTO" CACHE STRING
         "Linux _FORTIFY_SOURCE level (AUTO, 0, 1, 2, or 3)")
@@ -235,9 +257,11 @@ elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
     )
 endif()
 
-# Apply shared quality and hardening policies to every first-party target
-# declared below, including targets created by core and tests subdirectories.
-link_libraries(openscp_project_warnings openscp_project_hardening)
+# Apply shared platform, quality and hardening policies to every first-party
+# target declared below, including targets created by core and tests
+# subdirectories.
+link_libraries(openscp_project_platform openscp_project_warnings
+               openscp_project_hardening)
 
 set(OPENSCP_RECOMMENDED_QT_VERSION "6.11.2" CACHE STRING
     "Qt version used for official self-contained OpenSCP artifacts")
@@ -362,14 +386,19 @@ add_library(openscp_ui_logic STATIC
     ui/logic/updates/AppImageInstaller.hpp
     ui/logic/updates/AppImageInstaller.cpp
     ui/logic/updates/MacUpdater.hpp
+    ui/logic/updates/WindowsSetupInstaller.hpp
+    ui/logic/updates/WindowsSetupInstaller.cpp
     ui/logic/common/AppSettings.hpp
     ui/logic/common/AppSettings.cpp
+    ui/logic/common/LocalLinks.hpp
     ui/logic/common/StagingStore.hpp
     ui/logic/common/StagingStore.cpp
     ui/logic/common/MainWindowSharedUtils.hpp
     ui/logic/common/MainWindowSharedUtils.cpp
     ui/logic/common/RowSelection.hpp
     ui/logic/common/RowSelection.cpp
+    ui/logic/common/SingleInstance.hpp
+    ui/logic/common/SingleInstance.cpp
     ui/logic/common/TimeUtils.hpp
     ui/logic/common/UiAlerts.hpp
     ui/logic/common/UiAlerts.cpp
@@ -420,6 +449,8 @@ add_library(openscp_ui_logic STATIC
     ui/logic/transfers/BandwidthLimiter.hpp
     ui/logic/transfers/BandwidthLimiter.cpp
     ui/logic/transfers/ConflictCoordinator.hpp
+    ui/logic/transfers/MarkOfTheWeb.hpp
+    ui/logic/transfers/MarkOfTheWeb.cpp
     ui/logic/transfers/TransferExecutor.hpp
     ui/logic/transfers/TransferExecutor.cpp
     ui/logic/transfers/TransferManager.hpp
@@ -454,6 +485,12 @@ target_link_libraries(openscp_ui_logic
         openscp_core
         openscp_sync_logic
 )
+
+if(WIN32)
+    # ShellExecuteExW starts the update setup elevated for all-users
+    # installations; Urlmon maps a download's source to its security zone.
+    target_link_libraries(openscp_ui_logic PRIVATE Shell32 Ole32 Urlmon)
+endif()
 
 if(OPENSCP_ENABLE_SPARKLE)
     target_sources(openscp_ui_logic PRIVATE ui/logic/updates/MacUpdater.mm)
@@ -671,6 +708,27 @@ if(APPLE)
     # which runs scripts/package/macos.sh (macdeployqt + signing/notarization flow).
 endif()
 
+###############################################################################
+# Windows executable (OpenSCP.exe)
+# - GUI subsystem, so starting the application opens no console window
+# - Icon, version information and application manifest
+###############################################################################
+if(WIN32)
+    set(OPENSCP_WINDOWS_ICON_FILE
+        "${CMAKE_SOURCE_DIR}/assets/windows/OpenSCP.ico")
+    string(TIMESTAMP CURRENT_YEAR "%Y")
+    configure_file(assets/windows/OpenSCP.rc.in
+                   "${CMAKE_CURRENT_BINARY_DIR}/OpenSCP.rc" @ONLY)
+    target_sources(openscp PRIVATE
+        "${CMAKE_CURRENT_BINARY_DIR}/OpenSCP.rc"
+        assets/windows/OpenSCP.manifest
+    )
+    set_target_properties(openscp PROPERTIES
+        WIN32_EXECUTABLE TRUE
+        OUTPUT_NAME "OpenSCP"
+    )
+endif()
+
 if (OPENSCP_BUILD_SECURE_ONLY)
     target_compile_definitions(openscp_ui_logic
         PUBLIC OPENSCP_BUILD_SECURE_ONLY=1)
@@ -691,6 +749,7 @@ endif()
 # .ts files live in the top-level 'translations/' folder.
 qt_add_translation(QM_FILES
     translations/openscp_de.ts
+    translations/openscp_en.ts
     translations/openscp_es.ts
     translations/openscp_fr.ts
     translations/openscp_pt.ts

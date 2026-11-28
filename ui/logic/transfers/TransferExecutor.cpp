@@ -18,30 +18,38 @@ using Clock = std::chrono::steady_clock;
 constexpr double kBytesPerKiB = 1024.0;
 constexpr qint64 kUiProgressIntervalMs = 100;
 
+// lupdate cannot see through this helper, so each message is marked with
+// QT_TRANSLATE_NOOP where it is written.
 std::string translatedError(const char *message) {
     return QCoreApplication::translate("TransferManager", message)
         .toUtf8()
         .toStdString();
 }
 
-bool waitForTaskBandwidth(quint64 bytes, int taskLimitKBps,
+// The limit is read again on every slice of the wait, so that raising or
+// removing it also releases a task that is already waiting.
+bool waitForTaskBandwidth(quint64 bytes,
+                          const std::function<int()> &taskLimitKBps,
                           Clock::time_point &windowStart,
                           const std::function<bool()> &shouldCancel) {
-    if (taskLimitKBps <= 0 || bytes == 0)
+    const auto currentLimit = [&taskLimitKBps] {
+        return taskLimitKBps ? taskLimitKBps() : 0;
+    };
+    if (currentLimit() <= 0 || bytes == 0)
         return !shouldCancel();
 
-    const double expectedSeconds =
-        double(bytes) / (double(taskLimitKBps) * kBytesPerKiB);
-    const double elapsedSeconds =
-        std::chrono::duration<double>(Clock::now() - windowStart).count();
-    double remainingSeconds = expectedSeconds - elapsedSeconds;
-    while (remainingSeconds > 0.0005) {
+    for (int limit = currentLimit(); limit > 0; limit = currentLimit()) {
+        const double expectedSeconds =
+            double(bytes) / (double(limit) * kBytesPerKiB);
+        const double elapsedSeconds =
+            std::chrono::duration<double>(Clock::now() - windowStart).count();
+        const double remainingSeconds = expectedSeconds - elapsedSeconds;
+        if (remainingSeconds <= 0.0005)
+            break;
         if (shouldCancel())
             return false;
-        const double sliceSeconds = std::min(remainingSeconds, 0.05);
         std::this_thread::sleep_for(
-            std::chrono::duration<double>(sliceSeconds));
-        remainingSeconds -= sliceSeconds;
+            std::chrono::duration<double>(std::min(remainingSeconds, 0.05)));
     }
     windowStart = Clock::now();
     return !shouldCancel();
@@ -55,8 +63,10 @@ bool runFilesystemOperation(
         std::string localError;
         if (!openscp::localfiles::ensureLocalDirectories(task.dst.toStdString(),
                                                          localError)) {
-            error = translatedError("Could not create local directory") + ": " +
-                    localError;
+            error =
+                translatedError(QT_TRANSLATE_NOOP(
+                    "TransferManager", "Could not create local directory")) +
+                ": " + localError;
             return false;
         }
         return true;
@@ -71,8 +81,9 @@ bool runFilesystemOperation(
             return false;
         }
         if (exists && !isDirectory) {
-            error =
-                translatedError("Remote path exists and is not a directory");
+            error = translatedError(
+                QT_TRANSLATE_NOOP("TransferManager",
+                                  "Remote path exists and is not a directory"));
             return false;
         }
         return exists ||
@@ -82,15 +93,18 @@ bool runFilesystemOperation(
         if (openscp::localfiles::removeLocalPath(task.dst.toStdString(), false,
                                                  error))
             return true;
-        error = translatedError("Could not delete local file") + ": " + error;
+        error = translatedError(QT_TRANSLATE_NOOP(
+                    "TransferManager", "Could not delete local file")) +
+                ": " + error;
         return false;
     }
     if (task.type == TransferTask::Type::DeleteLocalDirectory) {
         if (openscp::localfiles::removeLocalPath(task.dst.toStdString(), true,
                                                  error))
             return true;
-        error = translatedError(
-                    "Could not delete local directory (it may not be empty)") +
+        error = translatedError(QT_TRANSLATE_NOOP(
+                    "TransferManager",
+                    "Could not delete local directory (it may not be empty)")) +
                 ": " + error;
         return false;
     }
@@ -154,16 +168,25 @@ bool TransferExecutor::run(
     }
 
     std::size_t previousBytes = 0;
+    // A backend may count the partial data that a resumed transfer continues
+    // from, as the SFTP one does. Those bytes moved in an earlier attempt, so
+    // the speed limits must not wait for them again: the first report only
+    // marks where this attempt starts.
+    bool firstReportOfResume = resume;
     auto previousTick = Clock::now();
     auto taskWindowStart = previousTick;
     qint64 lastNotificationMs = 0;
     const auto shouldCancel = [&callbacks] {
         return callbacks.shouldCancel && callbacks.shouldCancel();
     };
-    const auto progress = [&callbacks, &previousBytes, &previousTick,
-                           &taskWindowStart, &lastNotificationMs,
+    const auto progress = [&callbacks, &previousBytes, &firstReportOfResume,
+                           &previousTick, &taskWindowStart, &lastNotificationMs,
                            &shouldCancel](std::size_t completedBytes,
                                           std::size_t totalBytes) {
+        if (firstReportOfResume) {
+            firstReportOfResume = false;
+            previousBytes = completedBytes;
+        }
         const quint64 delta = completedBytes >= previousBytes
                                   ? completedBytes - previousBytes
                                   : completedBytes;
@@ -171,10 +194,8 @@ bool TransferExecutor::run(
             !callbacks.acquireGlobalBandwidth(delta)) {
             return;
         }
-        const int taskLimit =
-            callbacks.taskSpeedLimitKBps ? callbacks.taskSpeedLimitKBps() : 0;
-        if (!waitForTaskBandwidth(delta, taskLimit, taskWindowStart,
-                                  shouldCancel)) {
+        if (!waitForTaskBandwidth(delta, callbacks.taskSpeedLimitKBps,
+                                  taskWindowStart, shouldCancel)) {
             return;
         }
 
@@ -273,9 +294,10 @@ bool TransferExecutor::runPostAction(
                         .toStdString();
             return false;
         }
-        error = translatedError(
+        error = translatedError(QT_TRANSLATE_NOOP(
+                    "TransferManager",
                     "Transfer completed, but the local source could not be "
-                    "removed") +
+                    "removed")) +
                 ": " + error;
         return false;
     }
@@ -289,8 +311,9 @@ bool TransferExecutor::runPostAction(
         return true;
     }
     if (error.empty()) {
-        error = translatedError(
-            "Transfer completed, but the remote source could not be removed");
+        error = translatedError(QT_TRANSLATE_NOOP(
+            "TransferManager",
+            "Transfer completed, but the remote source could not be removed"));
     }
     return false;
 }

@@ -16,6 +16,7 @@
 #include <limits>
 #include <mutex>
 #include <optional>
+#include <random>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -338,11 +339,21 @@ bool runFtpCommands(CURL *curl, const SessionOptions &opt,
     curl_easy_reset(curl);
     if (!configureCommonCurlHandle(curl, opt, err))
         return false;
+    // The commands carry absolute paths, so they run where the connection
+    // already is: with an absolute URL path, libcurl sends no CWD and keeps
+    // its record of the current folder, which the next transfer then reuses.
+    if (curl_easy_setopt(curl, CURLOPT_FTP_FILEMETHOD,
+                         static_cast<long>(CURLFTPMETHOD_NOCWD)) != CURLE_OK) {
+        err = "Could not configure FTP directory changes.";
+        return false;
+    }
 
-    struct curl_slist *quote = nullptr;
-    for (const std::string &command : commands)
-        quote = curl_slist_append(quote, command.c_str());
-    if (!quote) {
+    curlcommon::CurlSlist quote(nullptr, &curl_slist_free_all);
+    const bool listed = std::all_of(
+        commands.begin(), commands.end(), [&quote](const std::string &command) {
+            return curlcommon::appendToCurlSlist(quote, command);
+        });
+    if (!listed || !quote) {
         err = "Could not allocate FTP command list.";
         return false;
     }
@@ -351,11 +362,12 @@ bool runFtpCommands(CURL *curl, const SessionOptions &opt,
     curlcommon::BoundedStringSink responseSink{&sink};
     curlcommon::TransferProgressContext cancelContext{
         {}, {}, interrupted, false};
-    const std::string url = buildFtpUrl(opt, "/");
+    // "%2F/" is absolute and ends in a slash, so it never names a file.
+    const std::string url = buildFtpUrl(opt, "/") + "%2F/";
     const bool configured =
         curl_easy_setopt(curl, CURLOPT_URL, url.c_str()) == CURLE_OK &&
         curl_easy_setopt(curl, CURLOPT_NOBODY, 1L) == CURLE_OK &&
-        curl_easy_setopt(curl, CURLOPT_QUOTE, quote) == CURLE_OK &&
+        curl_easy_setopt(curl, CURLOPT_QUOTE, quote.get()) == CURLE_OK &&
         curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION,
                          curlcommon::appendStringCallback) == CURLE_OK &&
         curl_easy_setopt(curl, CURLOPT_WRITEDATA, &responseSink) == CURLE_OK &&
@@ -371,18 +383,15 @@ bool runFtpCommands(CURL *curl, const SessionOptions &opt,
           curl_easy_setopt(curl, CURLOPT_VERBOSE, 1L) == CURLE_OK));
     if (!configured) {
         err = "Could not configure FTP command request.";
-        curl_slist_free_all(quote);
         return false;
     }
     if (curlcommon::rejectInterrupted(interrupted, err, &curlCodeOut)) {
-        curl_slist_free_all(quote);
         return false;
     }
 
     std::string detail;
     curlCodeOut = curlcommon::performWithErrorDetail(curl, detail);
     (void)curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &responseCodeOut);
-    curl_slist_free_all(quote);
     if (curlcommon::refusedResponse(responseSink, "FTP command response",
                                     curlCodeOut, err)) {
         return false;
@@ -721,6 +730,83 @@ RemoteError ftpPathErrorFromResult(CURL *curl, const SessionOptions &opt,
     return error;
 }
 
+std::vector<std::string> ftpRenameCommands(const std::string &commandRoot,
+                                           const std::string &from,
+                                           const std::string &to) {
+    return {"RNFR " + curlcommon::ftpCommandPath(commandRoot, from),
+            "RNTO " + curlcommon::ftpCommandPath(commandRoot, to)};
+}
+
+// Renames `from` to `to`, replacing a file there. A server that refuses RNTO
+// over an existing file, as IIS does by default, gets that file moved aside
+// under a free name first, and moved back if the rename still fails, so it is
+// never lost; once the rename succeeds, the file aside is deleted.
+bool renameReplacingFile(CURL *curl, const SessionOptions &opt,
+                         const std::string &commandRoot,
+                         const std::string &from, const std::string &to,
+                         const std::atomic<bool> *interrupted,
+                         bool &mlstRejected, bool &mlsdRejected,
+                         std::string &err, CURLcode &code, long &response) {
+    if (runFtpCommands(curl, opt, ftpRenameCommands(commandRoot, from, to),
+                       interrupted, err, code, response)) {
+        return true;
+    }
+    if (from == to || response < 500 || response >= 600)
+        return false;
+
+    const std::string refusal = err;
+    const CURLcode refusalCode = code;
+    const long refusalResponse = response;
+    const auto keepRefusal = [&] {
+        err = refusal;
+        code = refusalCode;
+        response = refusalResponse;
+        return false;
+    };
+    std::string stepError;
+    CURLcode stepCode = CURLE_OK;
+    long stepResponse = 0;
+    FileInfo existing;
+    if (lookupFtpEntry(curl, opt, commandRoot, to, interrupted, mlstRejected,
+                       mlsdRejected, existing, stepError, stepCode,
+                       stepResponse) != FtpLookupResult::Found ||
+        existing.is_dir) {
+        return keepRefusal();
+    }
+    std::random_device random;
+    std::ostringstream asideName;
+    asideName << to << ".openscp-backup-" << std::hex << random() << random();
+    const std::string aside = asideName.str();
+    FileInfo taken;
+    if (lookupFtpEntry(curl, opt, commandRoot, aside, interrupted, mlstRejected,
+                       mlsdRejected, taken, stepError, stepCode,
+                       stepResponse) != FtpLookupResult::NotFound) {
+        return keepRefusal();
+    }
+    // From here on a pause or a cancel has to wait: stopping halfway would
+    // leave the old file aside and nothing at the destination.
+    const std::atomic<bool> *const uninterrupted = nullptr;
+    if (!runFtpCommands(curl, opt, ftpRenameCommands(commandRoot, to, aside),
+                        uninterrupted, stepError, stepCode, stepResponse)) {
+        return keepRefusal();
+    }
+
+    if (runFtpCommands(curl, opt, ftpRenameCommands(commandRoot, from, to),
+                       uninterrupted, err, code, response)) {
+        // A file left aside is all that a failed DELE costs.
+        (void)runFtpCommands(
+            curl, opt,
+            {"DELE " + curlcommon::ftpCommandPath(commandRoot, aside)},
+            uninterrupted, stepError, stepCode, stepResponse);
+        return true;
+    }
+    err += runFtpCommands(curl, opt, ftpRenameCommands(commandRoot, aside, to),
+                          uninterrupted, stepError, stepCode, stepResponse)
+               ? " [old destination restored]"
+               : " [old destination remains at " + aside + "]";
+    return false;
+}
+
 } // namespace
 
 bool fetchFtpsServerPublicKeyPin(const SessionOptions &opt, std::string &pin,
@@ -820,8 +906,8 @@ bool CurlFtpClient::connect(const SessionOptions &opt, std::string &err) {
     const std::string url = buildFtpUrl(normalized, "/");
     // Authenticate and obtain the login directory without opening a data
     // connection or downloading a potentially huge root listing.
-    struct curl_slist *probeCommands = curl_slist_append(nullptr, "PWD");
-    if (!probeCommands) {
+    curlcommon::CurlSlist probeCommands(nullptr, &curl_slist_free_all);
+    if (!curlcommon::appendToCurlSlist(probeCommands, "PWD")) {
         err = "Could not allocate FTP connection probe command.";
         setLastOperationError(RemoteErrorKind::LocalIo, err);
         return false;
@@ -833,21 +919,20 @@ bool CurlFtpClient::connect(const SessionOptions &opt, std::string &err) {
         false};
     if (curl_easy_setopt(curl, CURLOPT_URL, url.c_str()) != CURLE_OK ||
         curl_easy_setopt(curl, CURLOPT_NOBODY, 1L) != CURLE_OK ||
-        curl_easy_setopt(curl, CURLOPT_QUOTE, probeCommands) != CURLE_OK ||
+        curl_easy_setopt(curl, CURLOPT_QUOTE, probeCommands.get()) !=
+            CURLE_OK ||
         curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L) != CURLE_OK ||
         curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION,
                          curlcommon::transferProgressCallback) != CURLE_OK ||
         curl_easy_setopt(curl, CURLOPT_XFERINFODATA, &cancelContext) !=
             CURLE_OK) {
         err = "Could not configure FTP connection probe.";
-        curl_slist_free_all(probeCommands);
         setLastOperationError(RemoteErrorKind::LocalIo, err);
         return false;
     }
 
     CURLcode rc = CURLE_OK;
     if (curlcommon::rejectInterrupted(operation.interrupted(), err, &rc)) {
-        curl_slist_free_all(probeCommands);
         setLastOperationError(RemoteErrorKind::Canceled, err,
                               static_cast<std::int64_t>(rc));
         return false;
@@ -856,7 +941,6 @@ bool CurlFtpClient::connect(const SessionOptions &opt, std::string &err) {
     rc = curlcommon::performWithErrorDetail(curl, detail);
     long responseCode = 0;
     (void)curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &responseCode);
-    curl_slist_free_all(probeCommands);
     if (operation.interrupted()->load() ||
         opt.connection_stop_token.stop_requested()) {
         err = "Interrupted";
@@ -900,6 +984,10 @@ void CurlFtpClient::disconnect() {
 
 void CurlFtpClient::interrupt() {
     state_->requestInterrupt();
+}
+
+void CurlFtpClient::clearInterrupt() {
+    state_->clearInterrupt();
 }
 
 bool CurlFtpClient::isConnected() const {
@@ -1028,7 +1116,8 @@ bool CurlFtpClient::put(const std::string &local, const std::string &remote,
     const SessionOptions &opt = *connection.options;
     const std::string &commandRoot = connection.commandRoot;
 
-    const std::string remotePartial = normalizeRemotePath(remote) + ".part";
+    const std::string remotePartial =
+        partialPathFor(normalizeRemotePath(remote));
     curlcommon::ActiveDestinationLease destinationLease(
         ftpDestinationKey(opt, remote));
     curlcommon::ActiveDestinationLease partialLease(
@@ -1056,14 +1145,11 @@ bool CurlFtpClient::put(const std::string &local, const std::string &remote,
                                                        configurationError) &&
                        curl_easy_setopt(handle, CURLOPT_URL, url.c_str()) ==
                            CURLE_OK &&
+                       // The queue creates missing folders before the upload.
+                       // One CWD reaches the folder, so this recreates only
+                       // its last level if that went away since.
                        curl_easy_setopt(handle, CURLOPT_FTP_CREATE_MISSING_DIRS,
-                                        CURLFTP_CREATE_DIR_RETRY) == CURLE_OK &&
-                       // A single CWD would create only the last missing
-                       // directory level.
-                       curl_easy_setopt(
-                           handle, CURLOPT_FTP_FILEMETHOD,
-                           static_cast<long>(CURLFTPMETHOD_MULTICWD)) ==
-                           CURLE_OK;
+                                        CURLFTP_CREATE_DIR_RETRY) == CURLE_OK;
             },
             [](CURLcode code, long responseCode, const std::string &message) {
                 return ftpErrorFromResult(code, responseCode, message);
@@ -1085,12 +1171,10 @@ bool CurlFtpClient::put(const std::string &local, const std::string &remote,
 
     CURLcode renameCode = CURLE_OK;
     long renameResponse = 0;
-    const std::vector<std::string> renameCommands = {
-        "RNFR " + curlcommon::ftpCommandPath(commandRoot, remotePartial),
-        "RNTO " + curlcommon::ftpCommandPath(commandRoot, remote),
-    };
-    if (!runFtpCommands(curl, opt, renameCommands, operation.interrupted(), err,
-                        renameCode, renameResponse)) {
+    if (!renameReplacingFile(curl, opt, commandRoot, remotePartial,
+                             normalizeRemotePath(remote),
+                             operation.interrupted(), mlstRejected_,
+                             mlsdRejected_, err, renameCode, renameResponse)) {
         setLastOperationError(
             ftpErrorFromResult(renameCode, renameResponse, err, true));
         return false;
@@ -1310,11 +1394,15 @@ bool CurlFtpClient::rename(const std::string &from, const std::string &to,
 
     CURLcode rc = CURLE_OK;
     long responseCode = 0;
-    const bool ok = runFtpCommands(
-        connection.session->get(), opt,
-        {"RNFR " + curlcommon::ftpCommandPath(commandRoot, source),
-         "RNTO " + curlcommon::ftpCommandPath(commandRoot, destination)},
-        operation.interrupted(), err, rc, responseCode);
+    const bool ok =
+        overwrite ? renameReplacingFile(connection.session->get(), opt,
+                                        commandRoot, source, destination,
+                                        operation.interrupted(), mlstRejected_,
+                                        mlsdRejected_, err, rc, responseCode)
+                  : runFtpCommands(
+                        connection.session->get(), opt,
+                        ftpRenameCommands(commandRoot, source, destination),
+                        operation.interrupted(), err, rc, responseCode);
     if (!ok) {
         setLastOperationError(ftpPathErrorFromResult(
             connection.session->get(), opt, commandRoot, source,

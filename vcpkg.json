@@ -1,0 +1,32 @@
+{
+  "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg.schema.json",
+  "name": "openscp",
+  "description": "Native libraries for Windows builds of OpenSCP. Qt comes from the Qt installer, not from vcpkg.",
+  "builtin-baseline": "a5f736224e85b32e25a8ffc52562333180396642",
+  "dependencies": [
+    {
+      "name": "curl",
+      "default-features": false,
+      "features": [
+        "openssl",
+        "sspi",
+        "winidn"
+      ]
+    },
+    {
+      "name": "libssh2",
+      "default-features": false,
+      "features": [
+        "openssl"
+      ]
+    },
+    "openssl",
+    "tinyxml2"
+  ],
+  "vcpkg-configuration": {
+    "$comment": "vcpkg-ports/openssl keeps OpenSSL on its 3.5 long-term support series, as the macOS release builds do; see vcpkg-ports/README.md.",
+    "overlay-ports": [
+      "./vcpkg-ports"
+    ]
+  }
+}

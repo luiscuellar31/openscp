@@ -1,9 +1,14 @@
+#include "PlatformTestSupport.hpp"
 #include "QtTestSupport.hpp"
 #include "TestHarness.hpp"
 #include "app/MainWindow.hpp"
 #include "logic/common/AppSettings.hpp"
 #include "logic/common/StagingStore.hpp"
 #include "logic/connections/SessionController.hpp"
+#include "logic/remote/RemoteModel.hpp"
+#include "logic/remote/RemoteOperationController.hpp"
+#include "logic/transfers/TransferManager.hpp"
+#include "mock/MockSftpClient.hpp"
 #include "widgets/common/ToolbarKeyboardNavigation.hpp"
 #include "widgets/dialogs/AuthenticationInput.hpp"
 #include "widgets/dialogs/TransferQueueDialog.hpp"
@@ -17,18 +22,27 @@
 #include <QDir>
 #include <QDropEvent>
 #include <QFile>
+#include <QFileInfo>
 #include <QFileSystemModel>
 #include <QInputDialog>
 #include <QItemSelectionModel>
 #include <QKeyEvent>
+#include <QKeySequence>
+#include <QLabel>
+#include <QMainWindow>
+#include <QMenu>
+#include <QMenuBar>
 #include <QMessageBox>
 #include <QMimeData>
 #include <QMouseEvent>
+#include <QProgressDialog>
 #include <QPushButton>
 #include <QSplitter>
 #include <QSplitterHandle>
 #include <QStandardPaths>
+#include <QStatusBar>
 #include <QTemporaryDir>
+#include <QTextDocument>
 #include <QThreadPool>
 #include <QTimer>
 #include <QToolBar>
@@ -130,6 +144,18 @@ bool hasAllFocusParts(const MainWindowFocusParts &parts) {
            parts.scpDownload;
 }
 
+// On macOS, which scrolls by pixel, a 50 000-entry listing froze the window
+// for over a second while the view measured each of its rows.
+OPENSCP_TEST(testFilePanelsGiveEveryRowOneHeight, test) {
+    configureMainWindowSettings(settingsRootPath);
+    MainWindow window;
+    const MainWindowFocusParts parts = focusParts(window);
+    test.check(parts.leftView && parts.rightView &&
+                   parts.leftView->uniformRowHeights() &&
+                   parts.rightView->uniformRowHeights(),
+               "both file panels should give every row the same height");
+}
+
 OPENSCP_TEST(testUpdateMenuIsManualByDefault, test) {
     configureMainWindowSettings(settingsRootPath);
     MainWindow window;
@@ -154,6 +180,81 @@ OPENSCP_TEST(testUpdateMenuIsManualByDefault, test) {
              .value(openscpui::settingskeys::kUpdateAutomaticChecks)
              .toBool(),
         "turning off checks persists without requiring a network request");
+}
+
+#ifdef Q_OS_WIN
+OPENSCP_TEST(testWindowsMenuBarHasNoApplicationMenu, test) {
+    configureMainWindowSettings(settingsRootPath);
+    MainWindow window;
+    auto *check =
+        window.findChild<QAction *>(QStringLiteral("checkForUpdatesAction"));
+    auto *automatic =
+        window.findChild<QAction *>(QStringLiteral("automaticUpdatesAction"));
+    QStringList visibleMenus;
+    QMenu *updatesMenu = nullptr;
+    for (QAction *menuAction : window.menuBar()->actions()) {
+        QMenu *menu = menuAction->menu();
+        if (!menu || !menuAction->isVisible())
+            continue;
+        visibleMenus.push_back(menu->title());
+        if (menu->actions().contains(check) &&
+            menu->actions().contains(automatic))
+            updatesMenu = menu;
+    }
+    test.check(visibleMenus == QStringList{QStringLiteral("&File"),
+                                           QStringLiteral("&Help")},
+               "Windows should show File and Help, without an OpenSCP menu");
+    test.check(updatesMenu && updatesMenu->title() == QStringLiteral("&Help"),
+               "the update actions should move to Help on Windows");
+}
+#endif
+
+OPENSCP_TEST(testMenusHaveDistinctAccessKeys, test) {
+#ifdef Q_OS_MACOS
+    test.skip("macOS menus have no access keys");
+#else
+    // Alt+F did not open File, and no menu item had a letter of its own.
+    configureMainWindowSettings(settingsRootPath);
+    MainWindow window;
+    QList<QKeySequence> menuKeys;
+    for (QAction *menuAction : window.menuBar()->actions()) {
+        QMenu *menu = menuAction->menu();
+        if (!menu || !menuAction->isVisible())
+            continue;
+        const QKeySequence menuKey = QKeySequence::mnemonic(menu->title());
+        test.check(!menuKey.isEmpty() && !menuKeys.contains(menuKey),
+                   "the menu " + menu->title().toStdString() +
+                       " should have an access key of its own");
+        menuKeys.push_back(menuKey);
+        QList<QKeySequence> itemKeys;
+        for (QAction *action : menu->actions()) {
+            if (action->isSeparator() || !action->isVisible())
+                continue;
+            const QKeySequence itemKey = QKeySequence::mnemonic(action->text());
+            test.check(!itemKey.isEmpty() && !itemKeys.contains(itemKey),
+                       "the item " + action->text().toStdString() + " of " +
+                           menu->title().toStdString() +
+                           " should have an access key of its own");
+            test.check(!action->toolTip().contains(QLatin1Char('&')),
+                       "the tooltip of " + action->text().toStdString() +
+                           " should not show the access key marker");
+            itemKeys.push_back(itemKey);
+        }
+    }
+#endif
+}
+
+OPENSCP_TEST(testSettingsAndQuitHaveShortcutsOnEveryPlatform, test) {
+    // Qt has no standard shortcut for either on Windows.
+    configureMainWindowSettings(settingsRootPath);
+    MainWindow window;
+    auto *settings =
+        window.findChild<QAction *>(QStringLiteral("settingsAction"));
+    auto *quit = window.findChild<QAction *>(QStringLiteral("quitAction"));
+    test.check(settings && !settings->shortcut().isEmpty(),
+               "Settings should have a keyboard shortcut");
+    test.check(quit && !quit->shortcut().isEmpty(),
+               "Quit should have a keyboard shortcut");
 }
 
 OPENSCP_TEST(testCloseCancelsAuthenticationBeforeUiDispatch, test) {
@@ -212,6 +313,8 @@ OPENSCP_TEST(testMainWindowSplitterPreservesAnEvenPanelResize, test) {
     test.check(qAbs(initialSizes[0] - initialSizes[1]) <= 2,
                "the default file panels should start with an even split");
 
+#ifdef Q_OS_MACOS
+    // Only macOS hides idle scroll bars.
     const MainWindowFocusParts parts = focusParts(window);
     test.check(parts.leftView && parts.rightView,
                "the splitter regression should use both file panels");
@@ -233,6 +336,7 @@ OPENSCP_TEST(testMainWindowSplitterPreservesAnEvenPanelResize, test) {
     test.check(
         qAbs(sizesAfterScrollBarsHide[0] - sizesAfterScrollBarsHide[1]) <= 2,
         "auto-hiding scrollbars should not change the panel split");
+#endif
 
     QSplitterHandle *handle = splitter->handle(1);
     test.check(handle && handle->width() >= 8 &&
@@ -393,6 +497,450 @@ OPENSCP_TEST(testForeignStagingDropCopiesWithoutDeleting, test) {
                "a staging folder from a foreign drag should not be deleted");
 }
 
+OPENSCP_TEST(testLocalDropsAskBeforeReplacingWhatIsThere, test) {
+    QTemporaryDir temporary;
+    test.check(temporary.isValid(), "the local drop needs a folder");
+    if (!temporary.isValid())
+        return;
+    configureMainWindowSettings(settingsRootPath);
+    const QDir root(temporary.path());
+    const auto write = [](const QString &path, const QByteArray &data) {
+        QFile file(path);
+        return QDir().mkpath(QFileInfo(path).absolutePath()) &&
+               file.open(QIODevice::WriteOnly) &&
+               file.write(data) == data.size();
+    };
+    const auto read = [](const QString &path) {
+        QFile file(path);
+        return file.open(QIODevice::ReadOnly) ? file.readAll() : QByteArray();
+    };
+    const QString leftReport = root.filePath(QStringLiteral("left/report.txt"));
+    const QString leftOnly =
+        root.filePath(QStringLiteral("left/src/local-only.txt"));
+    const QString rightReport =
+        root.filePath(QStringLiteral("right/report.txt"));
+    test.check(
+        write(root.filePath(QStringLiteral("source/report.txt")), "dropped") &&
+            write(root.filePath(QStringLiteral("source/src/other.txt")),
+                  "other") &&
+            write(leftReport, "left edit") && write(leftOnly, "kept") &&
+            write(rightReport, "right edit"),
+        "the local drop fixture should be created");
+
+    MainWindow window;
+    window.show();
+    flushUiEvents();
+    const MainWindowFocusParts parts = focusParts(window);
+    test.check(parts.leftPath && parts.rightPath && parts.leftView &&
+                   parts.rightView,
+               "the local drop needs both local panels");
+    if (!parts.leftPath || !parts.rightPath || !parts.leftView ||
+        !parts.rightView)
+        return;
+    parts.leftPath->pathRequested(root.filePath(QStringLiteral("left")));
+    parts.rightPath->pathRequested(root.filePath(QStringLiteral("right")));
+    flushUiEvents();
+
+    // Answers every prompt with `answer` and keeps its text.
+    QStringList prompts;
+    QMessageBox::StandardButton answer = QMessageBox::No;
+    QTimer answerer;
+    answerer.setInterval(10);
+    QObject::connect(&answerer, &QTimer::timeout, &window, [&] {
+        if (auto *box = qobject_cast<QMessageBox *>(
+                QApplication::activeModalWidget())) {
+            prompts.push_back(box->text());
+            box->done(answer);
+        }
+    });
+    answerer.start();
+    const auto drop = [&](DragAwareTreeView *view, const QStringList &paths) {
+        QList<QUrl> urls;
+        for (const QString &path : paths)
+            urls.push_back(QUrl::fromLocalFile(path));
+        QMimeData mime;
+        mime.setUrls(urls);
+        QDropEvent event(QPointF(10, 10), Qt::CopyAction, &mime, Qt::LeftButton,
+                         Qt::NoModifier);
+        static_cast<QObject &>(window).eventFilter(view->viewport(), &event);
+    };
+    const QStringList dropped{
+        root.filePath(QStringLiteral("source/report.txt")),
+        root.filePath(QStringLiteral("source/src"))};
+
+    drop(parts.leftView, dropped);
+    test.check(
+        openscp::testsupport::waitUntil([&] { return prompts.size() == 2; },
+                                        std::chrono::milliseconds(3000)),
+        "a drop on the left panel should ask about each entry there");
+    test.check(prompts.size() == 2 &&
+                   !prompts[0].contains(QStringLiteral("deletes")) &&
+                   prompts[1].contains(QStringLiteral("deletes")),
+               "the prompt for a folder should say that replacing it "
+               "deletes what only it holds");
+    // With every entry declined, the result shows at once; a copy that went
+    // ahead anyway would run later, after the files were read here.
+    const auto declinedResult = [&](int skipped) {
+        return openscp::testsupport::waitUntil(
+            [&] {
+                return window.statusBar()->currentMessage() ==
+                       QStringLiteral("Copied: 0  |  Failed: 0  |  Skipped: %1")
+                           .arg(skipped);
+            },
+            std::chrono::milliseconds(3000));
+    };
+    test.check(declinedResult(2) && read(leftReport) == "left edit" &&
+                   QFileInfo::exists(leftOnly),
+               "declining should leave the left panel's entries alone");
+
+    prompts.clear();
+    drop(parts.rightView, {root.filePath(QStringLiteral("source/report.txt"))});
+    test.check(
+        openscp::testsupport::waitUntil([&] { return prompts.size() == 1; },
+                                        std::chrono::milliseconds(3000)) &&
+            declinedResult(1) && read(rightReport) == "right edit",
+        "a drop on the local right panel should ask too");
+
+    prompts.clear();
+    answer = QMessageBox::YesToAll;
+    drop(parts.leftView, dropped);
+    test.check(
+        openscp::testsupport::waitUntil(
+            [&] {
+                return read(leftReport) == "dropped" &&
+                       QFileInfo::exists(
+                           root.filePath(QStringLiteral("left/src/other.txt")));
+            },
+            std::chrono::milliseconds(5000)) &&
+            prompts.size() == 1 && !QFileInfo::exists(leftOnly),
+        "accepting for all should replace the file and the folder, as F5 "
+        "does");
+}
+
+OPENSCP_TEST(testPanelsRefuseDragsWithoutLocalFiles, test) {
+    // Text, a web link or an Outlook attachment has no path to copy; dropped
+    // on the left panel, it downloaded what the remote panel had selected.
+    QTemporaryDir temporary;
+    test.check(temporary.isValid(), "the drag needs a folder");
+    if (!temporary.isValid())
+        return;
+    configureMainWindowSettings(settingsRootPath);
+    MainWindow window;
+    window.show();
+    flushUiEvents();
+    const MainWindowFocusParts parts = focusParts(window);
+    test.check(parts.leftView && parts.rightView, "the drag needs both panels");
+    if (!parts.leftView || !parts.rightView)
+        return;
+
+    const auto accepted = [&](DragAwareTreeView *view, const QMimeData &mime,
+                              QEvent::Type type) {
+        if (type == QEvent::DragEnter) {
+            QDragEnterEvent event(QPoint(10, 10), Qt::CopyAction, &mime,
+                                  Qt::LeftButton, Qt::NoModifier);
+            static_cast<QObject &>(window).eventFilter(view->viewport(),
+                                                       &event);
+            return event.isAccepted();
+        }
+        QDropEvent event(QPointF(10, 10), Qt::CopyAction, &mime, Qt::LeftButton,
+                         Qt::NoModifier, type);
+        static_cast<QObject &>(window).eventFilter(view->viewport(), &event);
+        return event.isAccepted();
+    };
+    QMimeData text;
+    text.setText(QStringLiteral("selected words"));
+    QMimeData link;
+    link.setUrls({QUrl(QStringLiteral("https://example.com/report.pdf"))});
+    QMimeData attachment;
+    attachment.setData(
+        QStringLiteral(
+            "application/x-qt-windows-mime;value=\"FileGroupDescriptorW\""),
+        QByteArray(4, '\0'));
+    QMimeData files;
+    files.setUrls({QUrl::fromLocalFile(temporary.path())});
+
+    for (DragAwareTreeView *view : {parts.leftView, parts.rightView}) {
+        for (const QMimeData *mime : {&text, &link, &attachment}) {
+            test.check(!accepted(view, *mime, QEvent::DragEnter) &&
+                           !accepted(view, *mime, QEvent::Drop),
+                       "a panel should refuse a drag without local files");
+        }
+        test.check(accepted(view, files, QEvent::DragEnter),
+                   "a panel should take local files");
+    }
+    accepted(parts.leftView, attachment, QEvent::DragEnter);
+    test.check(window.statusBar()->currentMessage().contains(
+                   QStringLiteral("e-mail attachments")),
+               "a dragged attachment should say why it cannot be dropped");
+}
+
+OPENSCP_TEST(testLocalCopyResultStaysInTheStatusBar, test) {
+    // Refreshing the panels after a copy, move or deletion showed "Left: …"
+    // and "Right: …" over its result, failures included.
+    QTemporaryDir temporary;
+    test.check(temporary.isValid(), "the local copy needs a folder");
+    if (!temporary.isValid())
+        return;
+    configureMainWindowSettings(settingsRootPath);
+    const QDir root(temporary.path());
+    test.check(QDir().mkpath(root.filePath(QStringLiteral("left"))) &&
+                   QDir().mkpath(root.filePath(QStringLiteral("right"))),
+               "the panels need their folders");
+    const QString source = root.filePath(QStringLiteral("report.txt"));
+    {
+        QFile file(source);
+        test.check(file.open(QIODevice::WriteOnly) && file.write("data") == 4,
+                   "the copy needs a file");
+    }
+
+    MainWindow window;
+    window.show();
+    flushUiEvents();
+    const MainWindowFocusParts parts = focusParts(window);
+    test.check(parts.leftPath && parts.rightPath && parts.rightView,
+               "the copy needs both local panels");
+    if (!parts.leftPath || !parts.rightPath || !parts.rightView)
+        return;
+    parts.leftPath->pathRequested(root.filePath(QStringLiteral("left")));
+    parts.rightPath->pathRequested(root.filePath(QStringLiteral("right")));
+    flushUiEvents();
+
+    QMimeData mime;
+    mime.setUrls({QUrl::fromLocalFile(source)});
+    QDropEvent drop(QPointF(10, 10), Qt::CopyAction, &mime, Qt::LeftButton,
+                    Qt::NoModifier);
+    static_cast<QObject &>(window).eventFilter(parts.rightView->viewport(),
+                                               &drop);
+    const auto message = [&] { return window.statusBar()->currentMessage(); };
+    test.check(openscp::testsupport::waitUntil(
+                   [&] {
+                       return message().startsWith(QStringLiteral("Copied")) ||
+                              message().startsWith(QStringLiteral("Right: "));
+                   },
+                   std::chrono::milliseconds(5000)),
+               "the copy should finish");
+    flushUiEvents();
+    test.check(message().startsWith(QStringLiteral("Copied: 1")),
+               "the copy's result should stay in the status bar: " +
+                   message().toStdString());
+}
+
+OPENSCP_TEST(testALocalCopyCanBeCanceledFromItsProgress, test) {
+    // A long local copy showed no progress, and only closing the window
+    // could stop it.
+    QTemporaryDir temporary;
+    test.check(temporary.isValid(), "the local copy needs a folder");
+    if (!temporary.isValid())
+        return;
+    configureMainWindowSettings(settingsRootPath);
+    const QDir root(temporary.path());
+    const QString right = root.filePath(QStringLiteral("right"));
+    const QString source = root.filePath(QStringLiteral("tree"));
+    test.check(QDir().mkpath(root.filePath(QStringLiteral("left"))) &&
+                   QDir().mkpath(right) && QDir().mkpath(source),
+               "the copy needs its folders");
+    // Enough files that the copy is still running when it is canceled.
+    for (int index = 0; index < 2000; ++index) {
+        QFile file(
+            QDir(source).filePath(QStringLiteral("file-%1.txt").arg(index)));
+        if (!file.open(QIODevice::WriteOnly) || file.write("data") != 4) {
+            test.check(false, "the copy needs its files");
+            return;
+        }
+    }
+
+    MainWindow window;
+    window.show();
+    flushUiEvents();
+    const MainWindowFocusParts parts = focusParts(window);
+    test.check(parts.leftPath && parts.rightPath && parts.rightView,
+               "the copy needs both local panels");
+    if (!parts.leftPath || !parts.rightPath || !parts.rightView)
+        return;
+    parts.leftPath->pathRequested(root.filePath(QStringLiteral("left")));
+    parts.rightPath->pathRequested(right);
+    flushUiEvents();
+
+    QMimeData mime;
+    mime.setUrls({QUrl::fromLocalFile(source)});
+    QDropEvent drop(QPointF(10, 10), Qt::CopyAction, &mime, Qt::LeftButton,
+                    Qt::NoModifier);
+    static_cast<QObject &>(window).eventFilter(parts.rightView->viewport(),
+                                               &drop);
+    // The copy starts once the drop is over.
+    QProgressDialog *progress = nullptr;
+    (void)openscp::testsupport::waitUntil(
+        [&] {
+            progress = window.findChild<QProgressDialog *>(
+                QStringLiteral("localOperationProgress"));
+            return progress != nullptr;
+        },
+        std::chrono::milliseconds(3000));
+    auto *cancel = progress ? progress->findChild<QPushButton *>() : nullptr;
+    test.check(cancel != nullptr, "a local copy should show its progress");
+    if (!cancel)
+        return;
+    // Canceled once it has staged some files, the copy stops in the middle
+    // of its entry.
+    const auto copying = [&right] {
+        const QFileInfoList staged = QDir(right).entryInfoList(
+            {QStringLiteral(".openscp-stage-*")},
+            QDir::Dirs | QDir::Hidden | QDir::NoDotAndDotDot);
+        return !staged.isEmpty() &&
+               !QDir(staged.front().filePath()).isEmpty(QDir::Files);
+    };
+    test.check(openscp::testsupport::waitUntil(copying,
+                                               std::chrono::milliseconds(5000)),
+               "the copy should start staging its files");
+    cancel->click();
+    const auto message = [&] { return window.statusBar()->currentMessage(); };
+    test.check(openscp::testsupport::waitUntil(
+                   [&] {
+                       return message().startsWith(QStringLiteral("Copied")) ||
+                              message().startsWith(QStringLiteral("Right: "));
+                   },
+                   std::chrono::milliseconds(10000)),
+               "the copy should stop");
+    flushUiEvents();
+    test.check(message().contains(QStringLiteral("Failed: 0")) &&
+                   message().contains(QStringLiteral("Canceled")),
+               "the result should say that the copy was canceled, not that it "
+               "failed: " +
+                   message().toStdString());
+    test.check(
+        QDir(right)
+            .entryList(QDir::AllEntries | QDir::Hidden | QDir::NoDotAndDotDot)
+            .isEmpty(),
+        "a canceled copy should leave nothing at its destination");
+}
+
+OPENSCP_TEST(testKeptStagingFolderShowsAsItIsNamed, test) {
+    // The message is rich text for its link, so a staging folder named with
+    // "&" or "<" lost characters or turned into markup.
+    QMainWindow window;
+    auto *view = new DragAwareTreeView(&window);
+    window.setCentralWidget(view);
+    const QString folder =
+        QDir::tempPath() + QStringLiteral("/R&D <b>kept</b>");
+    view->showKeepMessage(folder);
+    QString shown;
+    for (const QLabel *label : window.findChildren<QLabel *>()) {
+        QTextDocument document;
+        document.setHtml(label->text());
+        if (document.toPlainText().contains(QStringLiteral("R&D")))
+            shown = document.toPlainText();
+    }
+    test.check(shown.contains(folder),
+               "the message should show the folder as it is named: " +
+                   shown.toStdString());
+}
+
+// Exposes the drag that a mouse gesture would start.
+class DraggableView final : public DragAwareTreeView {
+    public:
+    using DragAwareTreeView::startDrag;
+};
+
+OPENSCP_TEST(testDragOutSaysWhatItLeftOut, test) {
+#ifndef _WIN32
+    test.skip("only Windows refuses remote names such as CON and a:b");
+#else
+    // Dragging a remote CON or a:b to Explorer showed "Preparing files…" for
+    // an instant and then nothing, and from a folder it left them out
+    // without a word.
+    configureMainWindowSettings(settingsRootPath);
+    QMainWindow window;
+    auto *view = new DraggableView;
+    window.setCentralWidget(view);
+    RemoteModel model;
+    openscp::FileInfo reserved;
+    reserved.name = "CON";
+    openscp::FileInfo colon;
+    colon.name = "a:b.txt";
+    model.setEntries(QStringLiteral("/"), {reserved, colon});
+    auto client = std::make_unique<openscp::MockSftpClient>();
+    openscp::SessionOptions options;
+    options.host = "localhost";
+    options.username = "tester";
+    std::string error;
+    test.check(client->connect(options, error), "the mock should connect");
+    RemoteOperationController operations;
+    operations.installSession(std::move(client));
+    TransferManager transfers;
+    view->setModel(&model);
+    view->setTransferManager(&transfers);
+    view->setRemoteOperationController(&operations);
+    view->setSelectionMode(QAbstractItemView::ExtendedSelection);
+    view->setSelectionBehavior(QAbstractItemView::SelectRows);
+    window.show();
+    flushUiEvents();
+
+    view->selectAll();
+    view->startDrag(Qt::CopyAction);
+    flushUiEvents();
+    const QString message = window.statusBar()->currentMessage();
+    test.check(message.contains(QStringLiteral("Nothing to drag")) &&
+                   message.contains(QStringLiteral("Skipped invalid: 2")),
+               "a drag that leaves out every name should say so: " +
+                   message.toStdString());
+#endif
+}
+
+OPENSCP_TEST(testDragOutNumbersNamesWithPercentSigns, test) {
+#ifndef _WIN32
+    test.skip("here only Windows makes names that differ in case meet");
+#else
+    // The staged copy of a second a%1b.pdf was named "A1B (.pdf)%3": each
+    // arg() replaced the lowest marker left, also one inside the name.
+    configureMainWindowSettings(settingsRootPath);
+    QMainWindow window;
+    auto *view = new DraggableView;
+    window.setCentralWidget(view);
+    RemoteModel model;
+    openscp::FileInfo lower;
+    lower.name = "a%1b.pdf";
+    openscp::FileInfo upper;
+    upper.name = "A%1B.pdf";
+    model.setEntries(QStringLiteral("/"), {lower, upper});
+    auto client = std::make_unique<openscp::MockSftpClient>();
+    openscp::SessionOptions options;
+    options.host = "localhost";
+    options.username = "tester";
+    std::string error;
+    test.check(client->connect(options, error), "the mock should connect");
+    RemoteOperationController operations;
+    operations.installSession(std::move(client));
+    QStringList stagedNames;
+    TransferManager transfers;
+    QObject::connect(&transfers, &TransferManager::tasksAdded, &transfers,
+                     [&transfers, &stagedNames](const QVector<quint64> &ids) {
+                         for (const TransferTask &task :
+                              transfers.tasksSnapshot(ids)) {
+                             stagedNames << QFileInfo(task.dst).fileName();
+                         }
+                     });
+    view->setModel(&model);
+    view->setTransferManager(&transfers);
+    view->setRemoteOperationController(&operations);
+    view->setSelectionMode(QAbstractItemView::ExtendedSelection);
+    view->setSelectionBehavior(QAbstractItemView::SelectRows);
+    window.show();
+    flushUiEvents();
+
+    view->selectAll();
+    view->startDrag(Qt::CopyAction);
+    test.check(openscp::testsupport::waitUntil(
+                   [&stagedNames] { return stagedNames.size() == 2; }),
+               "both files should be staged");
+    test.check(
+        stagedNames.contains(QStringLiteral("a%1b.pdf"), Qt::CaseInsensitive) &&
+            stagedNames.contains(QStringLiteral("a%1b (1).pdf"),
+                                 Qt::CaseInsensitive),
+        "the second file should be numbered as it is named: " +
+            stagedNames.join(QStringLiteral(", ")).toStdString());
+#endif
+}
+
 OPENSCP_TEST(testLocalDeleteRunsOffTheUiThread, test) {
     QTemporaryDir temporary;
     test.check(temporary.isValid(), "the delete test needs a folder");
@@ -409,7 +957,7 @@ OPENSCP_TEST(testLocalDeleteRunsOffTheUiThread, test) {
     test.check(QDir().mkpath(victim) && QDir().mkpath(outside) &&
                    inner.open(QIODevice::WriteOnly) &&
                    kept.open(QIODevice::WriteOnly) &&
-                   QFile::link(outside, link),
+                   openscp::testsupport::createLocalLink(outside, link),
                "the delete fixture should be created");
     inner.close();
     kept.close();
@@ -450,6 +998,7 @@ OPENSCP_TEST(testLocalDeleteRunsOffTheUiThread, test) {
     test.check(openscp::testsupport::waitUntil(
                    [&] {
                        return !QFileInfo::exists(victim) &&
+                              !QFileInfo::exists(link) &&
                               !QFileInfo(link).isSymLink();
                    },
                    std::chrono::milliseconds(5000)),
@@ -584,6 +1133,54 @@ OPENSCP_TEST(testLocalRenameValidatesNamesInBothPanes, test) {
     checkPane(parts.leftPath, parts.leftView, "renameLeftSelected", "left");
     checkPane(parts.rightPath, parts.rightView, "renameRightSelected", "right");
 }
+
+#ifdef Q_OS_WIN
+OPENSCP_TEST(testWindowsShortcutsShowAsThemselvesAndOpenTheirFolder, test) {
+    QTemporaryDir temporary;
+    const QDir root(temporary.path());
+    const QString panel = root.filePath(QStringLiteral("panel"));
+    const QString target = root.filePath(QStringLiteral("target"));
+    const QString shortcut = panel + QStringLiteral("/target.lnk");
+    test.check(root.mkpath(QStringLiteral("panel")) &&
+                   root.mkpath(QStringLiteral("target")) &&
+                   QFile::link(target, shortcut),
+               "the shortcut fixture should be created");
+
+    configureMainWindowSettings(settingsRootPath);
+    MainWindow window;
+    window.show();
+    flushUiEvents();
+    const MainWindowFocusParts parts = focusParts(window);
+    test.check(parts.leftPath && parts.leftView,
+               "the left panel should have its path bar and view");
+    if (!parts.leftPath || !parts.leftView)
+        return;
+    parts.leftPath->pathRequested(panel);
+    auto *model = qobject_cast<QFileSystemModel *>(parts.leftView->model());
+    const bool visible =
+        model && openscp::testsupport::waitUntil(
+                     [&] { return model->index(shortcut).isValid(); },
+                     std::chrono::milliseconds(3000));
+    test.check(visible, "the shortcut should appear in the panel");
+    if (!visible)
+        return;
+
+    // Resolved, a shortcut took the name of the entry it leads to, and one
+    // to a folder was dragged as that folder.
+    const QModelIndex index = model->index(shortcut);
+    test.check(!model->resolveSymlinks() &&
+                   index.data().toString() == QStringLiteral("target.lnk") &&
+                   model->filePath(index) == shortcut,
+               "a shortcut should show and drag as itself");
+    // As in Explorer, opening a shortcut to a folder shows that folder.
+    emit parts.leftView->activated(index);
+    flushUiEvents();
+    test.check(QDir::cleanPath(parts.leftPath->path()) ==
+                   QDir::cleanPath(target),
+               "opening a folder shortcut should show its folder: " +
+                   parts.leftPath->path().toStdString());
+}
+#endif
 
 OPENSCP_TEST(testPointerInteractionCancelsInitialConnectOverride, test) {
     configureMainWindowSettings(settingsRootPath);
@@ -825,7 +1422,11 @@ int main(int argc, char **argv) {
     }
     settingsRootPath = isolatedSettings.path();
     openscp::test::TestHarness harness("MainWindow navigation");
-    const int result = harness.run();
+    const int result = harness.run(argc, argv);
     openscp::testsupport::drainThreadPool();
+    // Test mode keeps its own data folder, which is the test's to remove.
+    (void)QDir(
+        QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation))
+        .removeRecursively();
     return result;
 }

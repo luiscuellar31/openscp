@@ -49,11 +49,40 @@ bool moveLocalEntry(const QString &srcPath, const QString &dstPath,
                     QString &error,
                     const std::function<bool()> &shouldCancel = {});
 
+// Whether a local panel showing `path` can go up. Windows has no single root
+// above its drives, so there a drive or share root goes up to a choice of
+// drives (chooseLocalDrive()).
+bool canGoUpLocally(const QString &path);
+
+// Shows the mounted drives below `anchor` and returns the chosen one's root,
+// or an empty string. Windows only; elsewhere it returns an empty string.
+QString chooseLocalDrive(QWidget *anchor, const QString &currentPath);
+
 bool isValidEntryName(const QString &name, QString *why = nullptr);
+// isValidEntryName(), and also a valid name for a local file or folder on this
+// computer: Windows refuses some names that servers accept, such as "a:b",
+// "CON" or one ending in a dot. Use it wherever a name becomes local.
+bool isValidLocalEntryName(const QString &name, QString *why = nullptr);
+
+// Where a name typed in promptValidEntryName() will be used.
+enum class EntryNameTarget { Remote, Local };
 bool promptValidEntryName(QWidget *parent, const QString &dialogTitle,
                           const QString &labelText, const QString &initialValue,
-                          QString &nameOut);
+                          QString &nameOut,
+                          EntryNameTarget target = EntryNameTarget::Remote);
 QString shortRemoteError(const QString &raw, const QString &fallback);
+
+// What a scan of remote folders left out.
+struct LeftOutEntries {
+    quint64 invalidNames = 0;
+    quint64 unlistedFolders = 0;
+    quint64 skippedLinks = 0;
+    quint64 depthLimits = 0;
+};
+// "Skipped invalid: 2  |  Folders not listed: 1", in the same order wherever
+// a scan reports it, without the counts that are zero; empty when nothing
+// was left out.
+QString leftOutSummary(const LeftOutEntries &leftOut);
 
 QVector<QPair<QString, QString>> buildLocalDestinationPairsWithOverwritePrompt(
     QWidget *parent, const QVector<QFileInfo> &sources,

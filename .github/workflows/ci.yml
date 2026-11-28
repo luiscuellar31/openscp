@@ -98,6 +98,101 @@ jobs:
           ctest --test-dir build-no-backends --output-on-failure \
             -R '^openscp_core_tests$'
 
+  windows:
+    if: >-
+      github.event_name == 'push' ||
+      (github.event_name == 'pull_request' && github.event.pull_request.draft == false)
+    name: Windows (MSVC, x64)
+    runs-on: windows-2022
+    timeout-minutes: 75
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Check PowerShell scripts
+        shell: pwsh
+        run: .\scripts\checks\powershell-quality.ps1
+
+      # aqtinstall 3.3.0 does not find Qt 6.11 for Windows in the current
+      # repository layout; this commit of its main branch does.
+      - name: Install pinned Qt
+        uses: jurplel/install-qt-action@b344308e4483fc892e0d27b3cd1b173ebdd95f06 # v4.5.0
+        with:
+          version: "6.11.2"
+          host: windows
+          target: desktop
+          arch: win64_msvc2022_64
+          cache: true
+          aqtsource: "git+https://github.com/miurahr/aqtinstall.git@076e1659807d0b362a3ed684d54c2e9c775eb9c7"
+          py7zrversion: "==1.1.0"
+
+      - name: Fetch vcpkg at the manifest baseline
+        id: vcpkg
+        shell: pwsh
+        run: .\scripts\ci\fetch_vcpkg.ps1
+
+      # A warning, not a failure: copying the port again after a baseline
+      # update from Dependabot is a maintainer's task.
+      - name: Compare the OpenSSL overlay port with vcpkg's
+        shell: pwsh
+        run: .\scripts\ci\check_vcpkg_overlay.ps1
+
+      # Exact matches only: vcpkg adds the archives of new ABIs beside the
+      # old ones, so a cache restored from another key would carry them all
+      # into the next one. A new key builds the libraries from scratch.
+      - name: Restore vcpkg binary cache
+        id: vcpkg-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}\vcpkg-archives
+          key: vcpkg-x64-windows-static-md-${{ hashFiles('vcpkg.json', 'vcpkg-ports/**') }}-${{ steps.vcpkg.outputs.msvc }}
+
+      # In a step of their own, so that the cache keeps them even when the
+      # build or the tests fail; CMake's vcpkg run then restores them from
+      # the archives.
+      - name: Build the vcpkg.json dependencies
+        shell: pwsh
+        run: |
+          & (Join-Path $env:VCPKG_ROOT 'vcpkg.exe') install --triplet x64-windows-static-md `
+            "--x-install-root=$env:RUNNER_TEMP\vcpkg_installed"
+
+      - name: Save vcpkg binary cache
+        if: steps.vcpkg-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}\vcpkg-archives
+          key: ${{ steps.vcpkg-cache.outputs.cache-primary-key }}
+
+      # Through the developer script, so that pull requests run it too. The
+      # integration tests skip without their servers.
+      - name: Configure, build and test with warnings as errors
+        shell: pwsh
+        env:
+          QT_PREFIX: ${{ env.QT_ROOT_DIR }}
+          OPENSCP_WERROR: "ON"
+        run: .\scripts\windows.ps1 test
+
+      - name: Install pinned Python for the test server and clang-tidy
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.14.7"
+
+      # Windows runners have no sshd, so a paramiko server stands in for it:
+      # the SFTP integration test runs against it directly and through a jump
+      # host, which OpenSCP reaches with Windows' ssh.exe.
+      - name: Test SFTP against a local server
+        shell: pwsh
+        run: .\scripts\ci\windows_sftp_integration.ps1
+
+      # The Linux static analysis never sees the Windows code; this runs its
+      # clang-tidy checks on the files that have some.
+      - name: Run clang-tidy on the Windows code
+        shell: bash
+        run: ./scripts/ci/windows_clang_tidy.sh build
+
   quick-dev:
     if: >-
       (github.event_name == 'push' && github.ref == 'refs/heads/dev') ||
@@ -214,6 +309,12 @@ jobs:
           PrintMotd no
           UseDNS no
           EOF
+          # OpenSSH 9.8 and later penalize an address whose connections end
+          # before logging in, as ssh-keyscan and refused host keys do, and
+          # then drop 127.0.0.1 in the middle of the tests.
+          if sudo /usr/sbin/sshd -t -f /tmp/openscp_sshd_config -o PerSourcePenalties=no 2>/dev/null; then
+            echo "PerSourcePenalties no" >> /tmp/openscp_sshd_config
+          fi
 
           if ! sudo /usr/sbin/sshd -t -f /tmp/openscp_sshd_config; then
             echo "Invalid sshd config"
@@ -288,6 +389,10 @@ jobs:
           LogLevel VERBOSE
           UseDNS no
           EOF
+          # See the Linux server: without this, the tests lose 127.0.0.1.
+          if sudo /usr/sbin/sshd -t -f /tmp/openscp_sshd_mac_config -o PerSourcePenalties=no 2>/dev/null; then
+            echo "PerSourcePenalties no" >> /tmp/openscp_sshd_mac_config
+          fi
 
           sudo /usr/sbin/sshd -f /tmp/openscp_sshd_mac_config -E /tmp/openscp_sshd_mac.log
 

@@ -10,6 +10,8 @@
 #include <QEvent>
 #include <QPlainTextEdit>
 #include <QPushButton>
+#include <QTableView>
+#include <QTextDocumentFragment>
 #include <QThreadPool>
 
 #include <algorithm>
@@ -79,6 +81,27 @@ OPENSCP_TEST(testComparisonWithoutSnapshotsIsReadyAtOnce, test) {
     QPushButton *synchronize = synchronizeButton(dialog);
     test.check(synchronize && synchronize->isEnabled(),
                "an empty comparison should leave the dialog usable");
+}
+
+OPENSCP_TEST(testPreviewToolTipShowsNamesAsText, test) {
+    // A server could make a name such as <img width=4000 height=4000>
+    // into markup in the tooltip of its row.
+    SyncDialog dialog;
+    const QString path = QStringLiteral("shared/<b>x.dat");
+    dialog.setSnapshots(snapshotWith(QStringLiteral("<b>x.dat"), 0), {});
+    test.check(waitUntil([&] { return hasItemFor(dialog, path); }),
+               "the comparison should reach the preview");
+    const auto *table = dialog.findChild<QTableView *>();
+    bool shownAsText = false;
+    for (int row = 0;
+         table && table->model() && row < table->model()->rowCount(); ++row) {
+        const QString tip =
+            table->model()->index(row, 0).data(Qt::ToolTipRole).toString();
+        shownAsText =
+            shownAsText ||
+            QTextDocumentFragment::fromHtml(tip).toPlainText().startsWith(path);
+    }
+    test.check(shownAsText, "the name should show as text in its tooltip");
 }
 
 OPENSCP_TEST(testComparisonRunsWithoutBlockingTheDialog, test) {
@@ -263,5 +286,5 @@ int main(int argc, char **argv) {
         return 1;
     }
     openscp::test::TestHarness harness("Sync dialog");
-    return harness.run();
+    return harness.run(argc, argv);
 }

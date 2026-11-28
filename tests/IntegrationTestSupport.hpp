@@ -140,6 +140,30 @@ class IntegrationTempDir final {
     bool valid_ = false;
 };
 
+// Removes `directory` and everything in it, as far as `client` can, and
+// reports nothing: it only keeps a failed run from leaving files on a server
+// that keeps them between runs. Links are removed, never followed.
+inline void removeRemoteTree(openscp::RemoteClient &client,
+                             const std::string &directory) {
+    std::vector<openscp::FileInfo> entries;
+    std::string error;
+    if (client.list(directory, entries, error)) {
+        for (const openscp::FileInfo &entry : entries) {
+            if (entry.name == "." || entry.name == "..")
+                continue;
+            const std::string path = joinRemotePath(directory, entry.name);
+            const bool link = (entry.mode & 0170000u) == 0120000u;
+            error.clear();
+            if (entry.is_dir && !link)
+                removeRemoteTree(client, path);
+            else
+                (void)client.removeFile(path, error);
+        }
+    }
+    error.clear();
+    (void)client.removeDir(directory, error);
+}
+
 struct ManagedFilesContractHooks {
     std::function<void(openscp::RemoteClient &, const std::string &,
                        TestContext &)>
@@ -366,6 +390,8 @@ inline void runManagedFilesContract(
     error.clear();
     checkOperation(client.removeDir(remoteDir, error),
                    "directory deletion should succeed", error);
+    // What a failed step left there.
+    removeRemoteTree(client, remoteDir);
     client.disconnect();
 }
 
@@ -432,6 +458,47 @@ inline void checkFtpEntryLookups(openscp::RemoteClient &client,
                    error);
 }
 
+// Some servers, such as IIS by default, refuse RNTO over an existing file. An
+// upload or a rename that replaces one must succeed anyway, and leave neither
+// its partial file nor its source behind. The file keeps its content.
+inline void checkFtpReplacesExistingFiles(openscp::RemoteClient &client,
+                                          const std::string &remotePath,
+                                          TestContext &test) {
+    IntegrationTempDir localDirectory;
+    const std::string copy = (localDirectory.path() / "copy").string();
+    std::string error;
+    test.checkWithError(localDirectory.isValid() &&
+                            client.get(remotePath, copy, error, {}, {}, false),
+                        "FTP: the uploaded file should download: ", error);
+    error.clear();
+    test.checkWithError(
+        client.put(copy, remotePath, error, {}, {}, false),
+        "FTP: an upload should replace an existing file: ", error);
+    bool isDirectory = false;
+    error.clear();
+    test.check(!client.exists(remotePath + ".part", isDirectory, error) &&
+                   error.empty(),
+               "FTP: an upload that replaces a file should leave no partial "
+               "file");
+    const std::string source = remotePath + ".source";
+    error.clear();
+    test.checkWithError(
+        client.put(copy, source, error, {}, {}, false) &&
+            client.rename(source, remotePath, error, true),
+        "FTP: a rename should replace an existing file: ", error);
+    error.clear();
+    test.check(!client.exists(source, isDirectory, error) && error.empty(),
+               "FTP: a rename that replaces a file should move its source");
+}
+
+// The FTP and FTPS checks that need an uploaded file.
+inline void checkFtpUploadedFile(openscp::RemoteClient &client,
+                                 const std::string &remotePath,
+                                 TestContext &test) {
+    checkFtpEntryLookups(client, remotePath, test);
+    checkFtpReplacesExistingFiles(client, remotePath, test);
+}
+
 // With certificate verification off, a connection accepts the public key the
 // probe read and refuses any other one.
 inline void checkTlsKeyPinning(openscp::SessionOptions options,
@@ -461,6 +528,10 @@ inline void checkTlsKeyPinning(openscp::SessionOptions options,
                prefix + "another key should be refused: " + error);
 }
 
+// A check that cannot run here is skipped, as one that needs an RSA host
+// key from a server without one. A run that sets
+// OPENSCP_IT_REQUIRE_ALL_CHECKS, as the CI does, fails instead, so a broken
+// tool on its runner cannot drop checks with the job still green.
 inline int finishIntegration(std::string_view suiteName,
                              const TestContext &test) {
     if (test.failures != 0) {
@@ -468,7 +539,16 @@ inline int finishIntegration(std::string_view suiteName,
                   << '\n';
         return EXIT_FAILURE;
     }
-    std::cout << "[OK] " << suiteName << '\n';
+    if (test.skipped != 0 && envValue("OPENSCP_IT_REQUIRE_ALL_CHECKS")) {
+        std::cerr << "[FAIL] " << suiteName << " skipped " << test.skipped
+                  << " checks, and OPENSCP_IT_REQUIRE_ALL_CHECKS requires "
+                     "them all\n";
+        return EXIT_FAILURE;
+    }
+    std::cout << "[OK] " << suiteName;
+    if (test.skipped != 0)
+        std::cout << " (" << test.skipped << " checks skipped)";
+    std::cout << '\n';
     return EXIT_SUCCESS;
 }
 

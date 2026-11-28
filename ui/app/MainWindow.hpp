@@ -30,6 +30,9 @@ class RemoteModel; // fwd
 class RemoteOperationController;
 class LocalTreeDiscovery;
 class SyncCoordinator;
+class SyncDialog;
+struct SyncPreparationResult;
+struct SyncSnapshotEntry;
 namespace openscpui {
 class FocusTraversalController;
 class PaneController;
@@ -92,7 +95,7 @@ class MainWindow : public QMainWindow {
     void showFavoritesDialog();     // Browse and manage saved paths
 
     void connectRemote();
-    void disconnectRemote();
+    bool disconnectRemote(); // false when the user chooses to stay connected
     void completeDisconnectRemote(quint64 disconnectSeq, bool forced);
     void rightItemActivated(const QModelIndex &idx); // double click on remote
     void
@@ -143,6 +146,11 @@ class MainWindow : public QMainWindow {
     openscpui::MacUpdater *macUpdater_ = nullptr;
     void initializeSyncCoordinator();
     QProgressDialog *makeComparisonProgress(const QString &label);
+    void onSyncPreparationReady(const SyncPreparationResult &prepared);
+    void connectChecksumFlow(SyncDialog &dialog, const QString &localRoot,
+                             const QString &remoteRoot,
+                             QVector<SyncSnapshotEntry> &localSnapshot,
+                             QVector<SyncSnapshotEntry> &remoteSnapshot);
     bool isScpTransferMode() const;
     void activateScpTransferModeUi(bool enabled);
     void showOpenPathDialog(bool rightPane);
@@ -238,6 +246,7 @@ class MainWindow : public QMainWindow {
     // Top menu
     QMenu *appMenu_ = nullptr;  // OpenSCP
     QMenu *fileMenu_ = nullptr; // File
+    QMenu *helpMenu_ = nullptr; // Help
     QAction *actAbout_ = nullptr;
     QAction *actPrefs_ = nullptr;
     QAction *actQuit_ = nullptr;
@@ -331,8 +340,7 @@ class MainWindow : public QMainWindow {
         bool isDir = false;
     };
     void runRemoteDownloadPrescan(const QVector<RemoteDownloadSeed> &seeds,
-                                  int initialSkipped, bool dragAndDrop,
-                                  bool moveSources = false);
+                                  int initialSkipped, bool moveSources = false);
     void startLocalUploadDiscovery(
         const QVector<QPair<QString, QString>> &localRemoteRoots,
         bool moveSources, bool dragAndDrop = false);
@@ -409,10 +417,20 @@ class MainWindow : public QMainWindow {
     std::shared_ptr<std::atomic<bool>> remoteScanCancelRequested_;
     std::atomic<bool> remoteScanInProgress_{false};
     QTimer *uploadRefreshTimer_ = nullptr;
+    // Uploads that finished in the visible remote folder since its last
+    // update, and whether one of them added a folder, which takes a listing.
+    QSet<QString> uploadedRemoteRows_;
+    bool uploadRefreshNeedsListing_ = false;
+    QSet<quint64> uploadStatJobs_;
     quint64 activeRemoteListJob_ = 0;
+    // A refresh asked for while its folder was being listed, to run after it.
+    bool remoteRefreshPending_ = false;
+    // The remote view had the keyboard focus when a listing disabled it.
+    bool remoteViewHadFocus_ = false;
     QString requestedRemotePath_;
-    QSet<QString> remoteRefreshSelectionNames_;
-    int remoteRefreshScrollValue_ = 0;
+    // Shown with no timeout while a folder is listed; a successful listing
+    // removes it unless another message has replaced it.
+    QString remoteListingMessage_;
     bool activeRemoteListIsRefresh_ = false;
     bool activeRemoteListIsInitial_ = false;
     bool initialRemoteFallbackAttempted_ = false;

@@ -4,6 +4,7 @@
 #include "logic/common/MainWindowSharedUtils.hpp"
 #include "logic/common/StagingStore.hpp"
 #include "logic/common/UiAlerts.hpp"
+#include "logic/common/UiFormatters.hpp"
 #include "logic/connections/SessionController.hpp"
 #include "logic/remote/LocalTreeDiscovery.hpp"
 #include "logic/remote/RemoteModel.hpp"
@@ -37,7 +38,43 @@
 
 namespace {
 
+// What is dropped on a panel is copied, uploaded or downloaded afterwards,
+// never moved, so the drop reports a copy. Accepting a proposed move would
+// let the source, such as Explorer or Finder with Shift held, delete the
+// originals while OpenSCP still reads them. A drag that offers no copy is
+// refused.
+void acceptDropAsCopy(QDropEvent *event) {
+    if (!event->possibleActions().testFlag(Qt::CopyAction)) {
+        event->ignore();
+        return;
+    }
+    event->setDropAction(Qt::CopyAction);
+    event->accept();
+}
+
 constexpr char kStagingBatchMime[] = "application/x-openscp-staging-batch";
+
+// Whether a drag carries at least one local file or folder, the only thing a
+// panel can copy, upload or download into: text and web links have no path.
+bool carriesLocalFiles(const QMimeData *mimeData) {
+    if (!mimeData || !mimeData->hasUrls())
+        return false;
+    const QList<QUrl> urls = mimeData->urls();
+    return std::any_of(urls.cbegin(), urls.cend(),
+                       [](const QUrl &url) { return url.isLocalFile(); });
+}
+
+// Whether a drag brings files that exist only inside the application they
+// come from, as Outlook attachments do on Windows: they have no path either.
+bool carriesVirtualFiles(const QMimeData *mimeData) {
+    return mimeData &&
+           (mimeData->hasFormat(QStringLiteral(
+                "application/"
+                "x-qt-windows-mime;value=\"FileGroupDescriptorW\"")) ||
+            mimeData->hasFormat(QStringLiteral(
+                "application/"
+                "x-qt-windows-mime;value=\"FileGroupDescriptor\"")));
+}
 
 QRect centeredQueueRect(QWidget *dialog, QWidget *mainWindow) {
     if (!dialog)
@@ -87,7 +124,7 @@ QRect centeredQueueRect(QWidget *dialog, QWidget *mainWindow) {
 
 void MainWindow::runRemoteDownloadPrescan(
     const QVector<RemoteDownloadSeed> &seeds, int initialSkipped,
-    bool dragAndDrop, bool moveSources) {
+    bool moveSources) {
     if (!rightIsRemote_ || !rightRemoteModel_ || !transferMgr_ || !remoteOps_ ||
         !remoteOps_->hasRequestedSession()) {
         UiAlerts::warning(this, tr("Remote"), tr("No active remote session."));
@@ -126,9 +163,7 @@ void MainWindow::runRemoteDownloadPrescan(
             queuedPairs.push_back({seed.remotePath, seed.localPath});
         const int enqueuedCount =
             transferMgr_->enqueueDownloads(queuedPairs, batchOptions);
-        QString message = dragAndDrop ? tr("Queued: %1 downloads (DND)")
-                                      : tr("Queued: %1 downloads");
-        message = message.arg(enqueuedCount);
+        QString message = tr("Queued: %n downloads", nullptr, enqueuedCount);
         if (initialSkipped > 0) {
             message += QStringLiteral("  |  ") +
                        tr("Skipped invalid: %1").arg(initialSkipped);
@@ -147,7 +182,6 @@ void MainWindow::runRemoteDownloadPrescan(
         QString remoteBase;
         QStringList topRemoteDirectories;
         QSet<RemoteOperationController::JobId> cleanupPending;
-        bool dragAndDrop = false;
         bool moveSources = false;
         bool canceled = false;
         bool scanReported = false;
@@ -176,7 +210,6 @@ void MainWindow::runRemoteDownloadPrescan(
     };
     auto state = std::make_shared<ScanState>();
     state->batchOptions = batchOptions;
-    state->dragAndDrop = dragAndDrop;
     state->moveSources = moveSources;
     state->remoteBase = rightRemoteModel_->rootPath();
     state->skippedInvalid = static_cast<quint64>(std::max(0, initialSkipped));
@@ -216,40 +249,26 @@ void MainWindow::runRemoteDownloadPrescan(
                 } else {
                     QString message =
                         state->moveSources
-                            ? tr("Queued: %1 downloads (move)")
-                            : (state->dragAndDrop
-                                   ? tr("Queued: %1 downloads (DND)")
-                                   : tr("Queued: %1 downloads"));
-                    message = message.arg(state->enqueuedDownloads);
+                            ? tr("Queued: %n downloads (move)", nullptr,
+                                 state->enqueuedDownloads)
+                            : tr("Queued: %n downloads", nullptr,
+                                 state->enqueuedDownloads);
                     if (state->enqueuedDirectories > 0) {
                         message += QStringLiteral("  |  ") +
                                    tr("Folders queued: %1")
                                        .arg(state->enqueuedDirectories);
                     }
-                    if (state->skippedInvalid > 0) {
-                        message += QStringLiteral("  |  ") +
-                                   tr("Skipped invalid: %1")
-                                       .arg(state->skippedInvalid);
-                    }
-                    if (state->listFailures > 0) {
-                        message += QStringLiteral("  |  ") +
-                                   tr("Folders not listed: %1")
-                                       .arg(state->listFailures);
-                    }
+                    const QString leftOut =
+                        leftOutSummary({.invalidNames = state->skippedInvalid,
+                                        .unlistedFolders = state->listFailures,
+                                        .skippedLinks = state->skippedSymlinks,
+                                        .depthLimits = state->depthLimits});
+                    if (!leftOut.isEmpty())
+                        message += QStringLiteral("  |  ") + leftOut;
                     if (state->unknownSizes > 0) {
                         message +=
                             QStringLiteral("  |  ") +
                             tr("Unknown sizes: %1").arg(state->unknownSizes);
-                    }
-                    if (state->skippedSymlinks > 0) {
-                        message += QStringLiteral("  |  ") +
-                                   tr("Symbolic links skipped: %1")
-                                       .arg(state->skippedSymlinks);
-                    }
-                    if (state->depthLimits > 0) {
-                        message += QStringLiteral("  |  ") +
-                                   tr("Depth limits reached: %1")
-                                       .arg(state->depthLimits);
                     }
                     if (state->canceled) {
                         message += QStringLiteral("  |  ") + tr("Canceled");
@@ -414,7 +433,7 @@ void MainWindow::runRemoteDownloadPrescan(
                     QLatin1Char('/'), Qt::SkipEmptyParts);
                 for (const QString &part : parts) {
                     QString why;
-                    if (!isValidEntryName(part, &why)) {
+                    if (!isValidLocalEntryName(part, &why)) {
                         valid = false;
                         break;
                     }
@@ -512,9 +531,10 @@ void MainWindow::runRemoteDownloadPrescan(
                 return;
             }
             remoteScanProgress_->setLabelText(
-                tr("Scanning remote folders... %1 folders, %2 files found")
-                    .arg(progress.visitedEntries)
-                    .arg(state->enqueuedDownloads));
+                tr("Scanning remote folders... %1, %2 found")
+                    .arg(tr("%n folders", nullptr,
+                            pluralCount(progress.visitedEntries)),
+                         tr("%n files", nullptr, state->enqueuedDownloads)));
         });
     state->completionConnection =
         connect(remoteOps_, &RemoteOperationController::jobFinished, this,
@@ -923,18 +943,16 @@ void MainWindow::startLocalUploadDiscovery(
                 if (state->discovery)
                     state->discovery->deleteLater();
 
-                QString message =
+                const QString uploads =
+                    tr("%n uploads", nullptr, state->uploadCount);
+                const QString folders =
+                    tr("%n folders", nullptr, state->directoryCount);
+                const QString queued =
                     state->dragAndDrop
-                        ? tr("Queued: %1 uploads, %2 folders (DND)")
-                              .arg(state->uploadCount)
-                              .arg(state->directoryCount)
-                        : (state->moveSources
-                               ? tr("Queued: %1 uploads, %2 folders (move)")
-                                     .arg(state->uploadCount)
-                                     .arg(state->directoryCount)
-                               : tr("Queued: %1 uploads, %2 folders")
-                                     .arg(state->uploadCount)
-                                     .arg(state->directoryCount));
+                        ? tr("Queued: %1, %2 (DND)")
+                        : (state->moveSources ? tr("Queued: %1, %2 (move)")
+                                              : tr("Queued: %1, %2"));
+                QString message = queued.arg(uploads, folders);
                 const QString notes = countersSummary(counters);
                 if (!notes.isEmpty())
                     message += QStringLiteral("  |  ") + notes;
@@ -1008,6 +1026,25 @@ bool MainWindow::eventFilter(QObject *eventSource, QEvent *event) {
         return QString::fromUtf8(raw).trimmed();
     };
 
+    // A drop without local files once downloaded the remote selection to the
+    // left panel; the remote panel's own drag brings the staged files.
+    if (event->type() == QEvent::DragEnter ||
+        event->type() == QEvent::DragMove || event->type() == QEvent::Drop) {
+        auto *dropEvent = static_cast<QDropEvent *>(event);
+        if (!carriesLocalFiles(dropEvent->mimeData())) {
+            if (event->type() == QEvent::DragEnter &&
+                carriesVirtualFiles(dropEvent->mimeData())) {
+                statusBar()->showMessage(
+                    tr("Files that exist only inside another application, such "
+                       "as e-mail attachments, cannot be dropped here. Save "
+                       "them to a folder first."),
+                    6000);
+            }
+            dropEvent->ignore();
+            return true;
+        }
+    }
+
     // Drag-and-drop over the right panel (local or remote)
     if (eventSource == rightViewport) {
         if (event->type() == QEvent::DragEnter) {
@@ -1016,7 +1053,7 @@ bool MainWindow::eventFilter(QObject *eventSource, QEvent *event) {
                 dragEnterEvent->ignore();
                 return true;
             }
-            dragEnterEvent->acceptProposedAction();
+            acceptDropAsCopy(dragEnterEvent);
             return true;
         } else if (event->type() == QEvent::DragMove) {
             auto *dragMoveEvent = static_cast<QDragMoveEvent *>(event);
@@ -1024,19 +1061,13 @@ bool MainWindow::eventFilter(QObject *eventSource, QEvent *event) {
                 dragMoveEvent->ignore();
                 return true;
             }
-            dragMoveEvent->acceptProposedAction();
+            acceptDropAsCopy(dragMoveEvent);
             return true;
         } else if (event->type() == QEvent::Drop) {
             auto *dropEvent = static_cast<QDropEvent *>(event);
             const QString stagingBatchDir =
                 extractStagingBatchDir(dropEvent->mimeData());
-            const auto urls = dropEvent->mimeData()
-                                  ? dropEvent->mimeData()->urls()
-                                  : QList<QUrl>{};
-            if (urls.isEmpty()) {
-                dropEvent->acceptProposedAction();
-                return true;
-            }
+            const auto urls = dropEvent->mimeData()->urls();
             if (rightIsRemote_) {
                 if (!stagingBatchDir.isEmpty()) {
                     statusBar()->showMessage(
@@ -1056,7 +1087,7 @@ bool MainWindow::eventFilter(QObject *eventSource, QEvent *event) {
                 }
                 // Upload to remote
                 if (!sessionController_->hasSession() || !rightRemoteModel_) {
-                    dropEvent->acceptProposedAction();
+                    acceptDropAsCopy(dropEvent);
                     return true;
                 }
                 const QString remoteBase = rightRemoteModel_->rootPath();
@@ -1076,16 +1107,16 @@ bool MainWindow::eventFilter(QObject *eventSource, QEvent *event) {
                 }
                 if (!roots.isEmpty())
                     startLocalUploadDiscovery(roots, false, true);
-                dropEvent->acceptProposedAction();
+                acceptDropAsCopy(dropEvent);
                 return true;
             } else {
                 // Local copy to the right panel directory
                 QDir dst(rightPath_->path());
                 if (!dst.exists()) {
-                    dropEvent->acceptProposedAction();
+                    acceptDropAsCopy(dropEvent);
                     return true;
                 }
-                QVector<LocalFsPair> pairs;
+                QVector<QFileInfo> sources;
                 for (const QUrl &url : urls) {
                     const QString localPath = url.toLocalFile();
                     if (localPath.isEmpty())
@@ -1097,25 +1128,32 @@ bool MainWindow::eventFilter(QObject *eventSource, QEvent *event) {
                     if (localFileInfo.absoluteFilePath() == target) {
                         continue;
                     }
-                    pairs.push_back({localFileInfo.absoluteFilePath(), target});
+                    sources.push_back(localFileInfo);
                 }
-                runLocalFsOperation(pairs, false, 0);
-                dropEvent->acceptProposedAction();
+                // As F5 does, ask before replacing an entry, once the drop is
+                // over: a dialog during it would hold the application the
+                // files come from.
+                QTimer::singleShot(0, this, [this, sources, dst] {
+                    int skipped = 0;
+                    const auto pairs =
+                        buildLocalDestinationPairsWithOverwritePrompt(
+                            this, sources, dst, &skipped);
+                    runLocalFsOperation(toLocalFsPairs(pairs), false, skipped);
+                });
+                acceptDropAsCopy(dropEvent);
                 return true;
             }
         }
     }
-    // Drag-and-drop over the left panel (local): copy/download
-    // Update delete shortcut enablement if selection changes due to DnD or
-    // click
+    // Drag-and-drop over the left panel (local): copy
     if (eventSource == leftViewport) {
         if (event->type() == QEvent::DragEnter) {
             auto *dragEnterEvent = static_cast<QDragEnterEvent *>(event);
-            dragEnterEvent->acceptProposedAction();
+            acceptDropAsCopy(dragEnterEvent);
             return true;
         } else if (event->type() == QEvent::DragMove) {
             auto *dragMoveEvent = static_cast<QDragMoveEvent *>(event);
-            dragMoveEvent->acceptProposedAction();
+            acceptDropAsCopy(dragMoveEvent);
             return true;
         } else if (event->type() == QEvent::Drop) {
             auto *dropEvent = static_cast<QDropEvent *>(event);
@@ -1130,85 +1168,55 @@ bool MainWindow::eventFilter(QObject *eventSource, QEvent *event) {
                 stagingBatchDir = openscpui::stagingBatchPathForCleanup(
                     settings, extractStagingBatchDir(dropEvent->mimeData()));
             }
-            const auto urls = dropEvent->mimeData()
-                                  ? dropEvent->mimeData()->urls()
-                                  : QList<QUrl>{};
-            if (!urls.isEmpty()) {
-                // Local copy towards the left panel
-                QDir dst(leftPath_->path());
-                if (!dst.exists()) {
-                    dropEvent->acceptProposedAction();
-                    return true;
-                }
-                QVector<LocalFsPair> pairs;
-                for (const QUrl &url : urls) {
-                    const QString localPath = url.toLocalFile();
-                    if (localPath.isEmpty())
-                        continue;
-                    QFileInfo localFileInfo(localPath);
-                    const QString target =
-                        dst.filePath(localFileInfo.fileName());
-                    // Avoid self-drop: same file/folder and same destination
-                    if (localFileInfo.absoluteFilePath() == target) {
-                        continue;
-                    }
-                    pairs.push_back({localFileInfo.absoluteFilePath(), target});
-                }
-                std::function<void(bool)> removeBatch;
-                if (!stagingBatchDir.isEmpty()) {
-                    // The batch goes once this copy ends; if part of it
-                    // failed, its files stay where the user can find them.
-                    QPointer<QTreeView> view(rightView_);
-                    removeBatch = [stagingBatchDir, view](bool allSucceeded) {
-                        if (!allSucceeded) {
-                            if (auto *dragView =
-                                    qobject_cast<DragAwareTreeView *>(view))
-                                dragView->showKeepMessage(stagingBatchDir);
-                            return;
-                        }
-                        QThreadPool::globalInstance()->start([stagingBatchDir] {
-                            openscpui::removeStagingBatch(stagingBatchDir);
-                        });
-                    };
-                }
-                runLocalFsOperation(pairs, false, 0, removeBatch);
-                dropEvent->acceptProposedAction();
-                updateDeleteShortcutEnables();
+            const auto urls = dropEvent->mimeData()->urls();
+            // Local copy towards the left panel
+            QDir dst(leftPath_->path());
+            if (!dst.exists()) {
+                acceptDropAsCopy(dropEvent);
                 return true;
             }
-            // Download from remote (based on right panel selection)
-            if (rightIsRemote_ == true && rightView_ && rightRemoteModel_) {
-                auto selectionModel = rightView_->selectionModel();
-                if (!selectionModel ||
-                    selectionModel->selectedRows(kNameColumn).isEmpty()) {
-                    dropEvent->acceptProposedAction();
-                    return true;
+            QVector<QFileInfo> sources;
+            for (const QUrl &url : urls) {
+                const QString localPath = url.toLocalFile();
+                if (localPath.isEmpty())
+                    continue;
+                QFileInfo localFileInfo(localPath);
+                const QString target = dst.filePath(localFileInfo.fileName());
+                // Avoid self-drop: same file/folder and same destination
+                if (localFileInfo.absoluteFilePath() == target) {
+                    continue;
                 }
-                const auto rows = selectionModel->selectedRows(kNameColumn);
-                int bad = 0;
-                QVector<RemoteDownloadSeed> seeds;
-                seeds.reserve(rows.size());
-                const QString remoteBase = rightRemoteModel_->rootPath();
-                QDir dst(leftPath_->path());
-                for (const QModelIndex &idx : rows) {
-                    const QString name = rightRemoteModel_->nameAt(idx);
-                    {
-                        QString why;
-                        if (!isValidEntryName(name, &why)) {
-                            ++bad;
-                            continue;
-                        }
-                    }
-                    const QString rpath = joinRemotePath(remoteBase, name);
-                    const QString lpath = dst.filePath(name);
-                    seeds.push_back(
-                        {rpath, lpath, rightRemoteModel_->isDir(idx)});
-                }
-                runRemoteDownloadPrescan(seeds, bad, true);
-                dropEvent->acceptProposedAction();
-                updateDeleteShortcutEnables();
-                return true;
+                sources.push_back(localFileInfo);
             }
+            std::function<void(bool)> removeBatch;
+            if (!stagingBatchDir.isEmpty()) {
+                // The batch goes once this copy ends; if part of it
+                // failed, its files stay where the user can find them.
+                QPointer<QTreeView> view(rightView_);
+                removeBatch = [stagingBatchDir, view](bool allSucceeded) {
+                    if (!allSucceeded) {
+                        if (auto *dragView =
+                                qobject_cast<DragAwareTreeView *>(view))
+                            dragView->showKeepMessage(stagingBatchDir);
+                        return;
+                    }
+                    QThreadPool::globalInstance()->start([stagingBatchDir] {
+                        openscpui::removeStagingBatch(stagingBatchDir);
+                    });
+                };
+            }
+            // As on the right panel, ask once the drop is over.
+            QTimer::singleShot(0, this, [this, sources, dst, removeBatch] {
+                int skipped = 0;
+                const auto pairs =
+                    buildLocalDestinationPairsWithOverwritePrompt(
+                        this, sources, dst, &skipped);
+                runLocalFsOperation(toLocalFsPairs(pairs), false, skipped,
+                                    removeBatch);
+            });
+            acceptDropAsCopy(dropEvent);
+            updateDeleteShortcutEnables();
+            return true;
         }
     }
     return QMainWindow::eventFilter(eventSource, event);

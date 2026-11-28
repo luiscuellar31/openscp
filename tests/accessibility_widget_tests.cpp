@@ -2,6 +2,7 @@
 #include "TestHarness.hpp"
 #include "logic/common/AppSettings.hpp"
 #include "logic/transfers/TransferManager.hpp"
+#include "widgets/common/FocusTraversalController.hpp"
 #include "widgets/common/InputModalityTracker.hpp"
 #include "widgets/common/ToolbarKeyboardNavigation.hpp"
 #include "widgets/dialogs/AboutDialog.hpp"
@@ -37,6 +38,7 @@
 #include <QStandardItemModel>
 #include <QTableView>
 #include <QTextBrowser>
+#include <QTextDocumentFragment>
 #include <QTimer>
 #include <QToolBar>
 #include <QToolButton>
@@ -128,6 +130,35 @@ class SettingsDialogFixture final {
     QStackedWidget *pages = nullptr;
 };
 
+OPENSCP_TEST(testPathSegmentToolTipShowsFolderNamesAsText, test) {
+    // A remote folder named like markup was laid out as markup in the
+    // tooltip that offers to open it.
+    openscpui::PathNavigationBar bar(openscpui::PathFlavor::Remote,
+                                     QStringLiteral("/<b>a/reports"));
+    bar.resize(480, bar.sizeHint().height());
+    bar.show();
+    flushUiEvents();
+    auto *display = qobject_cast<QLineEdit *>(bar.keyboardFocusTarget());
+    test.check(display != nullptr, "the path bar should have its field");
+    if (!display)
+        return;
+    // A point over the folder's name, whose characters start after "/".
+    QPoint over(-1, display->height() / 2);
+    for (int x = 0; x < display->width() && over.x() < 0; ++x) {
+        if (display->cursorPositionAt(QPoint(x, over.y())) == 3)
+            over.setX(x);
+    }
+    QMouseEvent move(QEvent::MouseMove, QPointF(over),
+                     QPointF(display->mapToGlobal(over)), Qt::NoButton,
+                     Qt::NoButton, Qt::NoModifier);
+    QApplication::sendEvent(display, &move);
+    const QString shown =
+        QTextDocumentFragment::fromHtml(display->toolTip()).toPlainText();
+    test.check(over.x() >= 0 && shown == QStringLiteral("Open /<b>a"),
+               "the tooltip should show the folder's name as text: " +
+                   shown.toStdString());
+}
+
 OPENSCP_TEST(testPathFieldPreservesAppearanceAndKeyboardNavigation, test) {
     openscpui::PathNavigationBar bar(openscpui::PathFlavor::Remote,
                                      QStringLiteral("/projects/reports"));
@@ -215,6 +246,50 @@ OPENSCP_TEST(testPathFieldPreservesAppearanceAndKeyboardNavigation, test) {
     flushUiEvents();
     test.check(display->fontMetrics().height() > initialFontHeight,
                "path navigation should inherit larger accessibility fonts");
+}
+
+OPENSCP_TEST(testDisablingTheFocusedViewDoesNotPassTheFocusOn, test) {
+    // The remote panel while it lists a folder, with the main toolbar's
+    // "Disconnect" next in the window's order.
+    OrderedFocusWindow window;
+    auto *layout = new QVBoxLayout(&window);
+    auto *panel = new DragAwareTreeView(&window);
+    auto *disconnect = new QPushButton(QStringLiteral("Disconnect"), &window);
+    auto *path = new QLineEdit(&window);
+    layout->addWidget(panel);
+    layout->addWidget(disconnect);
+    layout->addWidget(path);
+    window.order = {panel, disconnect, path};
+    window.show();
+    flushUiEvents();
+
+    panel->setFocus(Qt::OtherFocusReason);
+    panel->setEnabled(false);
+    flushUiEvents();
+    test.check(QApplication::focusWidget() == disconnect,
+               "disabling the focused view passes the focus to the next "
+               "widget, which a listing must not do");
+    panel->setEnabled(true);
+    panel->setFocus(Qt::OtherFocusReason);
+    flushUiEvents();
+
+    const bool held = openscpui::disableWithoutPassingFocus(panel);
+    flushUiEvents();
+    test.check(held && !panel->isEnabled() &&
+                   QApplication::focusWidget() == nullptr,
+               "while the view is disabled, no other widget should get the "
+               "focus, so Enter cannot press Disconnect");
+    openscpui::enableRestoringFocus(panel, held);
+    flushUiEvents();
+    test.check(panel->isEnabled() && QApplication::focusWidget() == panel,
+               "the view should get the focus back once enabled");
+
+    const bool heldAgain = openscpui::disableWithoutPassingFocus(panel);
+    path->setFocus(Qt::MouseFocusReason);
+    openscpui::enableRestoringFocus(panel, heldAgain);
+    flushUiEvents();
+    test.check(QApplication::focusWidget() == path,
+               "focus the user moved meanwhile should stay where it went");
 }
 
 OPENSCP_TEST(testPathFieldKeyboardCanReachTheRoot, test) {
@@ -509,7 +584,7 @@ OPENSCP_TEST(testFilePanelShowsKeyboardOnlyFocusOutline, test) {
                "Shift+Esc should reveal the panel focus outline");
 }
 
-OPENSCP_TEST(testFilePanelScrollBarsFollowScrollActivity, test) {
+OPENSCP_TEST(testFilePanelScrollBarsHideWhenIdleOnlyOnMacos, test) {
     QStandardItemModel model(80, 1);
     for (int row = 0; row < model.rowCount(); ++row) {
         model.setData(model.index(row, 0),
@@ -536,8 +611,14 @@ OPENSCP_TEST(testFilePanelScrollBarsFollowScrollActivity, test) {
         return panel.verticalScrollBarPolicy() == Qt::ScrollBarAlwaysOff &&
                panel.horizontalScrollBarPolicy() == Qt::ScrollBarAlwaysOff;
     };
+#ifdef Q_OS_MACOS
     test.check(waitUntil(scrollBarsAreHidden, std::chrono::milliseconds(3000)),
                "file-panel scrollbars should hide after inactivity");
+#else
+    // Elsewhere a hidden bar could not be dragged with the mouse.
+    test.check(!waitUntil(scrollBarsAreHidden, std::chrono::milliseconds(3000)),
+               "file-panel scrollbars should stay visible outside macOS");
+#endif
 
     const int initialScrollPosition = panel.verticalScrollBar()->value();
     const QPoint localPosition = panel.viewport()->rect().center();
@@ -550,12 +631,14 @@ OPENSCP_TEST(testFilePanelScrollBarsFollowScrollActivity, test) {
     flushUiEvents();
 
     test.check(panel.verticalScrollBar()->value() > initialScrollPosition,
-               "hiding the scrollbars should not disable file-panel scrolling");
+               "the wheel should scroll the file panel");
     test.check(panel.verticalScrollBarPolicy() == Qt::ScrollBarAsNeeded &&
                    panel.horizontalScrollBarPolicy() == Qt::ScrollBarAsNeeded,
-               "scrolling should reveal both file-panel scrollbars");
+               "scrolling should show both file-panel scrollbars");
+#ifdef Q_OS_MACOS
     test.check(waitUntil(scrollBarsAreHidden, std::chrono::milliseconds(3000)),
                "file-panel scrollbars should hide again after scrolling");
+#endif
 }
 
 OPENSCP_TEST(testPointerDialogCloseDoesNotCreateKeyboardFocus, test) {
@@ -1656,7 +1739,7 @@ int main(int argc, char **argv) {
         return 1;
     }
     openscp::test::TestHarness harness("Accessible widgets");
-    const int result = harness.run();
+    const int result = harness.run(argc, argv);
     openscp::testsupport::drainThreadPool();
     return result;
 }

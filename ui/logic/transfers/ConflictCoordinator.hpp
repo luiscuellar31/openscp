@@ -34,6 +34,9 @@ struct ConflictResolution {
 // Serializes conflict resolution within each batch. A decision marked
 // "apply to remaining" is stored before the next waiter is released, so
 // concurrent conflicts in that batch require only one user interaction.
+// Reading or setting a batch's policy never waits for a resolution, which
+// can wait for the user: the queue does both under its own lock, which a
+// resolution's cancel check takes.
 class ConflictCoordinator {
     public:
     using Resolver = std::function<ConflictResolution(const ConflictRequest &)>;
@@ -42,7 +45,7 @@ class ConflictCoordinator {
     void ensureBatchPolicy(std::uint64_t batchId,
                            TransferConflictPolicy policy) {
         const auto state = stateFor(batchId);
-        std::lock_guard<std::timed_mutex> lock(state->mutex);
+        std::lock_guard<std::mutex> lock(state->mutex);
         if (!state->configured) {
             state->policy = policy;
             state->configured = true;
@@ -51,7 +54,7 @@ class ConflictCoordinator {
 
     void setBatchPolicy(std::uint64_t batchId, TransferConflictPolicy policy) {
         const auto state = stateFor(batchId);
-        std::lock_guard<std::timed_mutex> lock(state->mutex);
+        std::lock_guard<std::mutex> lock(state->mutex);
         state->policy = policy;
         state->configured = true;
     }
@@ -62,7 +65,7 @@ class ConflictCoordinator {
         const auto state = findState(batchId);
         if (!state)
             return fallback;
-        std::lock_guard<std::timed_mutex> lock(state->mutex);
+        std::lock_guard<std::mutex> lock(state->mutex);
         return state->configured ? state->policy : fallback;
     }
 
@@ -71,24 +74,25 @@ class ConflictCoordinator {
                                const Resolver &resolver,
                                const CancelCheck &shouldCancel = {}) {
         const auto state = stateFor(request.batchId);
-        std::unique_lock<std::timed_mutex> lock(state->mutex, std::defer_lock);
-        while (!lock.try_lock_for(std::chrono::milliseconds(50))) {
+        std::unique_lock<std::timed_mutex> turn(state->turn, std::defer_lock);
+        while (!turn.try_lock_for(std::chrono::milliseconds(50))) {
             if (shouldCancel && shouldCancel())
                 return canceledResolution();
         }
         if (shouldCancel && shouldCancel())
             return canceledResolution();
 
-        TransferConflictPolicy policy =
-            state->configured ? state->policy : fallbackPolicy;
-        state->configured = true;
-        state->policy = policy;
-
-        if (!isSupported(policy, request)) {
+        TransferConflictPolicy policy = fallbackPolicy;
+        {
+            std::lock_guard<std::mutex> lock(state->mutex);
+            if (state->configured)
+                policy = state->policy;
             // An old/persisted policy can become unsupported when a backend
             // changes. Falling back to Ask prevents a silent overwrite.
-            state->policy = TransferConflictPolicy::Ask;
-            policy = TransferConflictPolicy::Ask;
+            if (!isSupported(policy, request))
+                policy = TransferConflictPolicy::Ask;
+            state->configured = true;
+            state->policy = policy;
         }
         if (policy != TransferConflictPolicy::Ask)
             return evaluate(policy, request);
@@ -105,12 +109,14 @@ class ConflictCoordinator {
                 return decision;
             if (!isSupported(decision.policy, request) ||
                 decision.policy == TransferConflictPolicy::Ask) {
+                std::lock_guard<std::mutex> lock(state->mutex);
                 state->policy = TransferConflictPolicy::Ask;
                 continue;
             }
 
             const TransferConflictPolicy selected = decision.policy;
             if (decision.applyToRemaining) {
+                std::lock_guard<std::mutex> lock(state->mutex);
                 state->policy = selected;
                 state->configured = true;
             }
@@ -128,7 +134,10 @@ class ConflictCoordinator {
 
     private:
     struct BatchState {
-        mutable std::timed_mutex mutex;
+        // Held for a whole resolution, prompt included.
+        std::timed_mutex turn;
+        // Guards the policy, and is held only to read or write it.
+        mutable std::mutex mutex;
         TransferConflictPolicy policy = TransferConflictPolicy::Ask;
         bool configured = false;
     };

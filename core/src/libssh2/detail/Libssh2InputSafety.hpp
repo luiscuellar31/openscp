@@ -31,6 +31,12 @@ inline bool validateEndpointHost(std::string_view host, const char *fieldLabel,
         error = label + " is required.";
         return false;
     }
+    // No host name or address starts with '-', and the ssh program that a
+    // jump host is given to would read one as an option.
+    if (host.front() == '-') {
+        error = label + " must not start with '-'.";
+        return false;
+    }
     const auto forbiddenHostCharacter = [](const unsigned char ch) {
         return ch < 0x20 || ch == 0x7f || std::isspace(ch) != 0 || ch == '/' ||
                ch == '\\' || ch == '@' || ch == '?' || ch == '#';
@@ -54,6 +60,15 @@ inline bool validateEndpointHost(std::string_view host, const char *fieldLabel,
         return false;
     }
     return true;
+}
+
+// The IPv6 address inside the brackets that validateEndpointHost() allows;
+// any other host as it is. The resolver, known_hosts and SOCKS5 take the
+// address alone.
+inline std::string withoutIpv6Brackets(std::string_view host) {
+    if (host.size() >= 2 && host.front() == '[' && host.back() == ']')
+        host = host.substr(1, host.size() - 2);
+    return std::string(host);
 }
 
 inline bool

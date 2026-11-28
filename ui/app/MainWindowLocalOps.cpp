@@ -16,9 +16,11 @@
 #include <QFileInfo>
 #include <QMenu>
 #include <QMessageBox>
+#include <QProgressDialog>
 #include <QPushButton>
 #include <QStatusBar>
 #include <QThreadPool>
+#include <QToolBar>
 
 #include <algorithm>
 #include <functional>
@@ -48,6 +50,27 @@ QString buildLocalFsSummaryMessage(bool deleteSource, int successCount,
                                                "Copied: %1  |  Failed: %2"))
         .arg(successCount)
         .arg(failureCount);
+}
+
+// The progress of a local operation on `items` entries. It shows once the
+// operation has taken a second, so a short one never flashes it, and its
+// Cancel sets `canceled`.
+QProgressDialog *
+createLocalFsProgress(QWidget *parent, const QString &label, qsizetype items,
+                      const std::shared_ptr<std::atomic_bool> &canceled) {
+    auto *progress = new QProgressDialog(
+        label, QCoreApplication::translate("MainWindow", "Cancel"), 0,
+        items > 1 ? static_cast<int>(items) : 0, parent);
+    progress->setObjectName(QStringLiteral("localOperationProgress"));
+    progress->setWindowModality(Qt::NonModal);
+    progress->setAutoClose(false);
+    progress->setAutoReset(false);
+    progress->setMinimumDuration(1000);
+    // Starts the wait; without a value the dialog never shows by itself.
+    progress->setValue(0);
+    QObject::connect(progress, &QProgressDialog::canceled, progress,
+                     [canceled] { canceled->store(true); });
+    return progress;
 }
 
 } // namespace
@@ -106,7 +129,10 @@ void MainWindow::setLeftRoot(const QString &path) {
     if (QDir(path).exists()) {
         const QString normalized = QDir(path).absolutePath();
         leftPath_->setPath(normalized);
-        leftView_->setRootIndex(leftModel_->index(normalized));
+        // index() alone finds no folder inside a hidden one, such as AppData
+        // or ~/.config, once the model has listed it while hidden entries
+        // are filtered out; setRootPath() makes the path visible.
+        leftView_->setRootIndex(leftModel_->setRootPath(normalized));
         addRecentLocalPath(normalized);
         refreshLeftPathNavigation();
         statusBar()->showMessage(tr("Left: ") + normalized, 3000);
@@ -122,8 +148,8 @@ void MainWindow::setRightRoot(const QString &path) {
     if (QDir(path).exists()) {
         const QString normalized = QDir(path).absolutePath();
         rightPath_->setPath(normalized);
-        rightView_->setRootIndex(
-            rightLocalModel_->index(normalized)); // <-- here
+        // See setLeftRoot().
+        rightView_->setRootIndex(rightLocalModel_->setRootPath(normalized));
         addRecentLocalPath(normalized);
         refreshRightPathNavigation();
         statusBar()->showMessage(tr("Right: ") + normalized, 3000);
@@ -146,21 +172,48 @@ void MainWindow::runLocalFsOperation(
     }
 
     ++localFsJobsInFlight_;
-    statusBar()->showMessage(deleteSource ? tr("Moving selected items...")
-                                          : tr("Copying selected items..."),
-                             1500);
+    const QString label = deleteSource ? tr("Moving selected items...")
+                                       : tr("Copying selected items...");
+    statusBar()->showMessage(label, 1500);
+
+    // Canceling stops before the next entry; a file being copied finishes
+    // first.
+    auto operationCanceled = std::make_shared<std::atomic_bool>(false);
+    const QPointer<QProgressDialog> progressDialog(
+        createLocalFsProgress(this, label, pairs.size(), operationCanceled));
 
     QPointer<MainWindow> self(this);
     localFsPool_.start([self, pairs, deleteSource, skippedCount, onFinished,
+                        label, progressDialog, operationCanceled,
                         canceled = localFsCanceled_]() {
         int successCount = 0;
         int failureCount = 0;
         QString lastError;
-        const auto shouldCancel = [canceled] { return canceled->load(); };
+        const auto shouldCancel = [canceled, operationCanceled] {
+            return canceled->load() || operationCanceled->load();
+        };
 
-        for (const auto &pair : pairs) {
-            if (shouldCancel())
+        bool wasCanceled = false;
+        for (qsizetype index = 0; index < pairs.size(); ++index) {
+            if (shouldCancel()) {
+                wasCanceled = true;
                 break;
+            }
+            const LocalFsPair &pair = pairs[index];
+            if (QObject *const app = QCoreApplication::instance()) {
+                QMetaObject::invokeMethod(
+                    app,
+                    [progressDialog, index,
+                     text = label + QLatin1Char('\n') +
+                            QFileInfo(pair.sourcePath).fileName()] {
+                        if (!progressDialog)
+                            return;
+                        progressDialog->setLabelText(text);
+                        if (progressDialog->maximum() > 0)
+                            progressDialog->setValue(static_cast<int>(index));
+                    },
+                    Qt::QueuedConnection);
+            }
             QString operationError;
             const bool succeeded =
                 deleteSource ? moveLocalEntry(pair.sourcePath, pair.targetPath,
@@ -169,6 +222,10 @@ void MainWindow::runLocalFsOperation(
                                               operationError, shouldCancel);
             if (succeeded) {
                 ++successCount;
+            } else if (shouldCancel()) {
+                // A canceled entry is left as it was, not failed.
+                wasCanceled = true;
+                break;
             } else {
                 ++failureCount;
                 lastError = operationError;
@@ -181,16 +238,31 @@ void MainWindow::runLocalFsOperation(
         QMetaObject::invokeMethod(
             app,
             [self, successCount, failureCount, skippedCount, lastError,
-             deleteSource, onFinished]() {
+             deleteSource, onFinished, progressDialog, wasCanceled]() {
+                if (progressDialog)
+                    progressDialog->deleteLater();
                 if (!self)
                     return;
 
                 --self->localFsJobsInFlight_;
                 if (onFinished)
-                    onFinished(failureCount == 0);
+                    onFinished(failureCount == 0 && !wasCanceled);
+
+                // Refreshing the panels shows their paths, so the result,
+                // with its errors, comes after.
+                self->setLeftRoot(self->leftPath_->path());
+                if (!self->rightIsRemote_) {
+                    self->setRightRoot(self->rightPath_->path());
+                }
+                self->updateDeleteShortcutEnables();
 
                 QString statusMessage = buildLocalFsSummaryMessage(
                     deleteSource, successCount, failureCount, skippedCount);
+                if (wasCanceled) {
+                    statusMessage +=
+                        QStringLiteral("  |  ") +
+                        QCoreApplication::translate("MainWindow", "Canceled");
+                }
                 if (failureCount > 0 && !lastError.isEmpty()) {
                     statusMessage += "\n" +
                                      QCoreApplication::translate(
@@ -198,12 +270,6 @@ void MainWindow::runLocalFsOperation(
                                      lastError;
                 }
                 self->statusBar()->showMessage(statusMessage, 6000);
-
-                self->setLeftRoot(self->leftPath_->path());
-                if (!self->rightIsRemote_) {
-                    self->setRightRoot(self->rightPath_->path());
-                }
-                self->updateDeleteShortcutEnables();
             },
             Qt::QueuedConnection);
     });
@@ -403,14 +469,15 @@ void MainWindow::runLocalDelete(const QStringList &paths) {
                 if (!self)
                     return;
                 --self->localFsJobsInFlight_;
-                self->statusBar()->showMessage(tr("Deleted: %1  |  Failed: %2")
-                                                   .arg(deletedCount)
-                                                   .arg(failedCount),
-                                               5000);
+                // As after a copy, the result comes after the refresh.
                 self->setLeftRoot(self->leftPath_->path());
                 if (!self->rightIsRemote_)
                     self->setRightRoot(self->rightPath_->path());
                 self->updateDeleteShortcutEnables();
+                self->statusBar()->showMessage(tr("Deleted: %1  |  Failed: %2")
+                                                   .arg(deletedCount)
+                                                   .arg(failedCount),
+                                               5000);
             },
             Qt::QueuedConnection);
     });
@@ -419,8 +486,13 @@ void MainWindow::runLocalDelete(const QStringList &paths) {
 void MainWindow::goUpLeft() {
     QString currentPath = leftPath_->path();
     QDir currentDir(currentPath);
-    if (!currentDir.cdUp())
+    if (!currentDir.cdUp()) {
+        const QString drive = chooseLocalDrive(
+            leftPaneBar_->widgetForAction(actUpLeft_), currentPath);
+        if (!drive.isEmpty())
+            setLeftRoot(drive);
         return;
+    }
     setLeftRoot(currentDir.absolutePath());
     updateDeleteShortcutEnables();
 }
@@ -476,7 +548,10 @@ void MainWindow::leftItemActivated(const QModelIndex &idx) {
         return;
     const QFileInfo selectedFileInfo = leftModel_->fileInfo(idx);
     if (selectedFileInfo.isDir()) {
-        setLeftRoot(selectedFileInfo.absoluteFilePath());
+        // As in Explorer, a shortcut to a folder opens that folder.
+        setLeftRoot(selectedFileInfo.isShortcut()
+                        ? selectedFileInfo.symLinkTarget()
+                        : selectedFileInfo.absoluteFilePath());
     } else if (selectedFileInfo.isFile()) {
         openLocalPathWithPreference(selectedFileInfo.absoluteFilePath());
     }
@@ -485,7 +560,8 @@ void MainWindow::leftItemActivated(const QModelIndex &idx) {
 bool MainWindow::renameLocalSelectedEntry(const QFileInfo &selectedFileInfo) {
     QString newName;
     if (!promptValidEntryName(this, tr("Rename"), tr("New name:"),
-                              selectedFileInfo.fileName(), newName) ||
+                              selectedFileInfo.fileName(), newName,
+                              EntryNameTarget::Local) ||
         newName == selectedFileInfo.fileName())
         return false;
     const QString newPath =
@@ -545,7 +621,8 @@ bool MainWindow::createLocalFile(const QDir &base, const QString &name) {
 // Create a new directory in the left (local) pane.
 void MainWindow::newDirLeft() {
     QString name;
-    if (!promptValidEntryName(this, tr("New folder"), tr("Name:"), {}, name))
+    if (!promptValidEntryName(this, tr("New folder"), tr("Name:"), {}, name,
+                              EntryNameTarget::Local))
         return;
     QDir base(leftPath_->path());
     if (!createLocalDirectory(base, name))
@@ -556,7 +633,8 @@ void MainWindow::newDirLeft() {
 // Create a new empty file in the left (local) pane.
 void MainWindow::newFileLeft() {
     QString name;
-    if (!promptValidEntryName(this, tr("New file"), tr("Name:"), {}, name))
+    if (!promptValidEntryName(this, tr("New file"), tr("Name:"), {}, name,
+                              EntryNameTarget::Local))
         return;
     QDir base(leftPath_->path());
     if (!createLocalFile(base, name))
@@ -573,8 +651,8 @@ void MainWindow::showLeftContextMenu(const QPoint &pos) {
     if (auto selectionModel = leftView_->selectionModel()) {
         hasSel = !selectionModel->selectedRows(kNameColumn).isEmpty();
     }
-    QDir currentDir(leftPath_ ? leftPath_->path() : QString());
-    bool canGoUp = currentDir.cdUp();
+    const bool canGoUp =
+        canGoUpLocally(leftPath_ ? leftPath_->path() : QString());
 
     QAction *copyToRight = nullptr;
     QAction *moveToRight = nullptr;

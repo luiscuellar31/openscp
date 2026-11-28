@@ -9,6 +9,7 @@
 #include "logic/remote/RemoteModel.hpp"
 #include "logic/remote/RemoteOperationController.hpp"
 #include "logic/transfers/TransferManager.hpp"
+#include "widgets/common/FocusTraversalController.hpp"
 #include "widgets/dialogs/PermissionsDialog.hpp"
 #include "widgets/navigation/PathNavigationBar.hpp"
 #include "widgets/platform/PlatformFilePicker.hpp"
@@ -22,6 +23,7 @@
 #include <QMessageBox>
 #include <QScrollBar>
 #include <QStatusBar>
+#include <QToolBar>
 
 namespace {
 
@@ -52,8 +54,13 @@ void MainWindow::goUpRight() {
     } else {
         QString cur = rightPath_->path();
         QDir currentDir(cur);
-        if (!currentDir.cdUp())
+        if (!currentDir.cdUp()) {
+            const QString drive = chooseLocalDrive(
+                rightPaneBar_->widgetForAction(actUpRight_), cur);
+            if (!drive.isEmpty())
+                setRightRoot(drive);
             return;
+        }
         setRightRoot(currentDir.absolutePath());
         updateDeleteShortcutEnables();
     }
@@ -109,7 +116,7 @@ void MainWindow::openRightRemoteTerminal() {
     }
 
     QString launchError;
-    if (!terminalCommands.launch(command.command, &launchError)) {
+    if (!terminalCommands.launch(command, &launchError)) {
         UiAlerts::warning(this, tr("Open in terminal"),
                           tr("Could not open a remote terminal.\n%1")
                               .arg(launchError.isEmpty() ? tr("Unknown error.")
@@ -172,41 +179,49 @@ void MainWindow::requestRemoteListing(const QString &path, bool refresh,
     }
 
     const QString normalized = normalizeRemotePath(path);
+    // A refresh of the folder being listed waits for that listing: replacing
+    // it would discard its result, and uploads that keep finishing would keep
+    // every listing from showing.
+    if (refresh && activeRemoteListJob_ != 0 &&
+        requestedRemotePath_ == normalized) {
+        remoteRefreshPending_ = true;
+        return;
+    }
+    remoteRefreshPending_ = false;
     // The new listing replaces the old one; interrupting it would drop the
     // control connection and make the next listing log in again.
     if (activeRemoteListJob_ != 0)
         remoteOps_->cancel(activeRemoteListJob_,
                            RemoteOperationController::Interrupt::No);
 
-    remoteRefreshSelectionNames_.clear();
-    remoteRefreshScrollValue_ = 0;
-    if (refresh && rightView_->selectionModel()) {
-        const QModelIndexList selected =
-            rightView_->selectionModel()->selectedRows(kNameColumn);
-        for (const QModelIndex &index : selected) {
-            const QString name = rightRemoteModel_->nameAt(index);
-            if (!name.isEmpty())
-                remoteRefreshSelectionNames_.insert(name);
-        }
-        if (rightView_->verticalScrollBar()) {
-            remoteRefreshScrollValue_ =
-                rightView_->verticalScrollBar()->value();
-        }
-    }
-
     requestedRemotePath_ = normalized;
     activeRemoteListIsRefresh_ = refresh;
     activeRemoteListIsInitial_ = initialLoad;
     if (initialLoad && normalized != QStringLiteral("/"))
         initialRemoteFallbackAttempted_ = false;
-    if (!refresh)
-        rightRemoteModel_->setLoading(normalized);
     rightPath_->setPath(normalized);
     refreshRightPathNavigation();
-    rightView_->setEnabled(false);
-    statusBar()->showMessage(refresh ? tr("Refreshing remote folder…")
-                                     : tr("Opening remote folder…"),
-                             0);
+    // A refresh keeps the current entries usable until the new ones arrive.
+    if (!refresh) {
+        rightRemoteModel_->setLoading(normalized);
+        // Disabling the focused view would pass the focus to "Disconnect",
+        // where the next Enter disconnects; the view gets it back after the
+        // listing.
+        remoteViewHadFocus_ =
+            openscpui::disableWithoutPassingFocus(rightView_) ||
+            remoteViewHadFocus_;
+    }
+    // A refresh keeps the entries usable, so it leaves another message in
+    // place, such as the result of the deletion that asked for it.
+    const QString shownMessage = statusBar()->currentMessage();
+    if (!refresh || shownMessage.isEmpty() ||
+        shownMessage == remoteListingMessage_) {
+        remoteListingMessage_ = refresh ? tr("Refreshing remote folder…")
+                                        : tr("Opening remote folder…");
+        statusBar()->showMessage(remoteListingMessage_, 0);
+    } else {
+        remoteListingMessage_.clear();
+    }
 
     RemoteOperationController::ListRequest request;
     request.path = normalized;
@@ -221,7 +236,10 @@ void MainWindow::rightItemActivated(const QModelIndex &idx) {
             return;
         const QFileInfo localFileInfo = rightLocalModel_->fileInfo(idx);
         if (localFileInfo.isDir()) {
-            setRightRoot(localFileInfo.absoluteFilePath());
+            // See leftItemActivated().
+            setRightRoot(localFileInfo.isShortcut()
+                             ? localFileInfo.symLinkTarget()
+                             : localFileInfo.absoluteFilePath());
         } else if (localFileInfo.isFile()) {
             openLocalPathWithPreference(localFileInfo.absoluteFilePath());
         }
@@ -240,7 +258,7 @@ void MainWindow::rightItemActivated(const QModelIndex &idx) {
     const QString name = rightRemoteModel_->nameAt(idx);
     {
         QString why;
-        if (!isValidEntryName(name, &why)) {
+        if (!isValidLocalEntryName(name, &why)) {
             UiAlerts::warning(this, tr("Invalid name"), why);
             return;
         }
@@ -258,8 +276,7 @@ void MainWindow::rightItemActivated(const QModelIndex &idx) {
         // Enqueue download so it appears in the queue (instead of direct
         // download)
         taskId = transferMgr_->enqueueDownload(remotePath, localPath);
-        statusBar()->showMessage(QString(tr("Queued: %1 downloads")).arg(1),
-                                 3000);
+        statusBar()->showMessage(tr("Queued: %n downloads", nullptr, 1), 3000);
         maybeShowTransferQueue();
     } else {
         // There was already an identical task in the queue; optionally show it
@@ -267,7 +284,7 @@ void MainWindow::rightItemActivated(const QModelIndex &idx) {
         statusBar()->showMessage(tr("Download already queued"), 2000);
     }
     if (taskId != 0) {
-        transferUiController_.openDownloadWhenCompleted(taskId, localPath);
+        transferUiController_.openDownloadWhenCompleted(taskId);
         // The task can complete very quickly, including before enqueueDownload
         // returns. Reconcile its current snapshot after registering intent.
         handleTransferUiUpdate({taskId}, {});
@@ -321,8 +338,7 @@ void MainWindow::downloadRightToLeft() {
             return;
         }
         transferMgr_->enqueueDownload(remotePath, dst.filePath(name));
-        statusBar()->showMessage(QString(tr("Queued: %1 downloads")).arg(1),
-                                 4000);
+        statusBar()->showMessage(tr("Queued: %n downloads", nullptr, 1), 4000);
         maybeShowTransferQueue();
         const qsizetype slash = remotePath.lastIndexOf('/');
         const QString parent =
@@ -357,7 +373,7 @@ void MainWindow::downloadRightToLeft() {
         const QString name = rightRemoteModel_->nameAt(idx);
         {
             QString why;
-            if (!isValidEntryName(name, &why)) {
+            if (!isValidLocalEntryName(name, &why)) {
                 ++skippedInvalidCount;
                 continue;
             }
@@ -366,7 +382,7 @@ void MainWindow::downloadRightToLeft() {
         const QString localPath = dst.filePath(name);
         seeds.push_back({remotePath, localPath, rightRemoteModel_->isDir(idx)});
     }
-    runRemoteDownloadPrescan(seeds, skippedInvalidCount, false);
+    runRemoteDownloadPrescan(seeds, skippedInvalidCount);
 }
 
 // Copy the selection from the right panel to the left.
@@ -409,7 +425,7 @@ void MainWindow::copyRightToLeft() {
         const QString name = rightRemoteModel_->nameAt(idx);
         {
             QString why;
-            if (!isValidEntryName(name, &why)) {
+            if (!isValidLocalEntryName(name, &why)) {
                 ++skippedInvalidCount;
                 continue;
             }
@@ -418,7 +434,7 @@ void MainWindow::copyRightToLeft() {
         const QString localPath = dst.filePath(name);
         seeds.push_back({remotePath, localPath, rightRemoteModel_->isDir(idx)});
     }
-    runRemoteDownloadPrescan(seeds, skippedInvalidCount, false);
+    runRemoteDownloadPrescan(seeds, skippedInvalidCount);
 }
 
 // Move the selection from the right panel to the left.
@@ -456,14 +472,14 @@ void MainWindow::moveRightToLeft() {
     for (const QModelIndex &index : rows) {
         const QString name = rightRemoteModel_->nameAt(index);
         QString why;
-        if (!isValidEntryName(name, &why)) {
+        if (!isValidLocalEntryName(name, &why)) {
             ++skippedInvalidCount;
             continue;
         }
         seeds.push_back({joinRemotePath(remoteBase, name), dst.filePath(name),
                          rightRemoteModel_->isDir(index)});
     }
-    runRemoteDownloadPrescan(seeds, skippedInvalidCount, false, true);
+    runRemoteDownloadPrescan(seeds, skippedInvalidCount, true);
 }
 
 void MainWindow::uploadViaDialog() {
@@ -500,7 +516,7 @@ void MainWindow::uploadViaDialog() {
         }
         if (enqueuedCount > 0) {
             statusBar()->showMessage(
-                QString(tr("Queued: %1 uploads")).arg(enqueuedCount), 4000);
+                tr("Queued: %n uploads", nullptr, enqueuedCount), 4000);
             maybeShowTransferQueue();
         }
         return;
@@ -540,7 +556,9 @@ void MainWindow::uploadViaDialog() {
 
 void MainWindow::newDirRight() {
     QString name;
-    if (!promptValidEntryName(this, tr("New folder"), tr("Name:"), {}, name))
+    if (!promptValidEntryName(this, tr("New folder"), tr("Name:"), {}, name,
+                              rightIsRemote_ ? EntryNameTarget::Remote
+                                             : EntryNameTarget::Local))
         return;
     if (rightIsRemote_) {
         if (!remoteActionController_ || !rightRemoteModel_)
@@ -558,7 +576,9 @@ void MainWindow::newDirRight() {
 // Create a new empty file in the right pane (local only).
 void MainWindow::newFileRight() {
     QString name;
-    if (!promptValidEntryName(this, tr("New file"), tr("Name:"), {}, name))
+    if (!promptValidEntryName(this, tr("New file"), tr("Name:"), {}, name,
+                              rightIsRemote_ ? EntryNameTarget::Remote
+                                             : EntryNameTarget::Local))
         return;
     if (rightIsRemote_) {
         if (!remoteActionController_ || !rightRemoteModel_)
@@ -665,8 +685,7 @@ void MainWindow::showRightContextMenu(const QPoint &pos) {
                               : (rightPath_ ? rightPath_->path() : QString()));
         canGoUp = (!cur.isEmpty() && cur != "/");
     } else {
-        QDir currentDir(rightPath_ ? rightPath_->path() : QString());
-        canGoUp = currentDir.cdUp();
+        canGoUp = canGoUpLocally(rightPath_ ? rightPath_->path() : QString());
     }
 
     if (isScpTransferMode()) {

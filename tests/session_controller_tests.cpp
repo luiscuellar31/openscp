@@ -84,5 +84,5 @@ OPENSCP_TEST(testSessionLifecycle, test) {
 int main(int argc, char **argv) {
     QCoreApplication application(argc, argv);
     openscp::test::TestHarness harness("session controller");
-    return harness.run();
+    return harness.run(argc, argv);
 }

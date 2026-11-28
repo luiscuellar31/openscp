@@ -1,3 +1,4 @@
+#include "PlatformTestSupport.hpp"
 #include "QtTestSupport.hpp"
 #include "TestHarness.hpp"
 #include "logic/remote/RemoteOperationController.hpp"
@@ -8,10 +9,12 @@
 
 #include <QCoreApplication>
 #include <QCryptographicHash>
+#include <QDateTime>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QTemporaryDir>
+#include <QTimeZone>
 #include <QTimer>
 
 #include <algorithm>
@@ -21,7 +24,14 @@
 #include <thread>
 #include <utility>
 
-#ifndef _WIN32
+#ifdef _WIN32
+// clang-format off
+#include <windows.h>
+#include <aclapi.h>
+// clang-format on
+// Here DeleteFile is a SyncAction, not the Win32 function's macro.
+#undef DeleteFile
+#else
 #include <sys/stat.h>
 #endif
 
@@ -122,6 +132,29 @@ class SpecialEntryMockClient final : public openscp::MockSftpClient {
     }
 };
 
+OPENSCP_TEST(testChecksumsReachEntriesCheckedOnBothSides, test) {
+    SyncChecksumResult result;
+    result.localChecksums.insert(QStringLiteral("both.txt"), "local-sum");
+    result.remoteChecksums.insert(QStringLiteral("both.txt"), "remote-sum");
+    result.localChecksums.insert(QStringLiteral("local-only.txt"), "alone");
+    QVector<SyncSnapshotEntry> local(2);
+    local[0].relativePath = QStringLiteral("both.txt");
+    local[1].relativePath = QStringLiteral("local-only.txt");
+    QVector<SyncSnapshotEntry> remote(1);
+    remote[0].relativePath = QStringLiteral("both.txt");
+
+    SyncCoordinator::applyChecksums(result, local, remote);
+    test.check(local[0].checksum == "local-sum" &&
+                   remote[0].checksum == "remote-sum" &&
+                   local[0].checksumAlgorithm == result.algorithm &&
+                   remote[0].checksumAlgorithm == result.algorithm,
+               "an entry checked on both sides should get its own side's "
+               "checksum");
+    test.check(local[1].checksum.isEmpty() &&
+                   local[1].checksumAlgorithm.isEmpty(),
+               "an entry with nothing to compare against should get none");
+}
+
 OPENSCP_TEST(testCoordinatorIsDestroyedAfterItsControllers, test) {
     // MainWindow creates the remote controller first, and Qt destroys
     // children in creation order, so the coordinator outlives it.
@@ -148,7 +181,10 @@ OPENSCP_TEST(testCoordinatorIsDestroyedAfterItsControllers, test) {
 }
 
 OPENSCP_TEST(testScanMarksSpecialEntriesAndRefusesUnsafeNames, test) {
-#ifndef _WIN32
+#ifdef _WIN32
+    test.skip("Windows has no FIFOs, and its names cannot hold a backslash or "
+              "a line break.");
+#else
     QTemporaryDir localRoot;
     test.check(
         localRoot.isValid() &&
@@ -212,6 +248,126 @@ OPENSCP_TEST(testScanMarksSpecialEntriesAndRefusesUnsafeNames, test) {
                             }),
                "special entries should never be selected for copying");
 #endif
+}
+
+#ifdef Q_OS_WIN
+OPENSCP_TEST(testWindowsShortcutsSyncAsFiles, test) {
+    // Qt describes the entry a shortcut leads to; synchronization compares
+    // and hashes the shortcut itself, the file that uploads copy.
+    QTemporaryDir localRoot;
+    QTemporaryDir outside;
+    QFile big(outside.filePath(QStringLiteral("big.txt")));
+    test.check(localRoot.isValid() && outside.isValid() &&
+                   big.open(QIODevice::WriteOnly) &&
+                   big.write(QByteArray(5000, 'x')) == 5000,
+               "the shortcut targets should be created");
+    big.close();
+    const QStringList names{QStringLiteral("folder.lnk"),
+                            QStringLiteral("file.lnk")};
+    test.check(QFile::link(outside.path(), localRoot.filePath(names[0])) &&
+                   QFile::link(big.fileName(), localRoot.filePath(names[1])),
+               "the shortcuts should be created");
+
+    RemoteOperationController remote;
+    test.check(remote.installSession(
+                   connectedClient<ChecksumMockClient>("sync.test")) > 0,
+               "remote controller should accept a connected session");
+    TransferManager transfers;
+    SyncCoordinator coordinator(&remote, &transfers);
+    bool ready = false;
+    SyncPreparationResult prepared;
+    QObject::connect(&coordinator, &SyncCoordinator::preparationReady,
+                     &coordinator, [&](const SyncPreparationResult &result) {
+                         prepared = result;
+                         ready = true;
+                     });
+    coordinator.start(localRoot.path(), QStringLiteral("/"));
+    test.check(waitUntil([&] { return ready; }),
+               "a scan with shortcuts should complete");
+
+    bool checked = false;
+    SyncChecksumResult checksums;
+    QObject::connect(&coordinator, &SyncCoordinator::checksumReady,
+                     &coordinator, [&](const SyncChecksumResult &value) {
+                         checksums = value;
+                         checked = true;
+                     });
+    QObject::connect(&coordinator, &SyncCoordinator::checksumFailed,
+                     &coordinator, [&](const QString &) { checked = true; });
+    coordinator.startChecksums(localRoot.path(), QStringLiteral("/"), names);
+    test.check(waitUntil([&] { return checked; }),
+               "shortcut checksums should complete");
+
+    for (const QString &name : names) {
+        QFile shortcut(localRoot.filePath(name));
+        const QByteArray contents = shortcut.open(QIODevice::ReadOnly)
+                                        ? shortcut.readAll()
+                                        : QByteArray();
+        const auto entry = std::find_if(prepared.localSnapshot.cbegin(),
+                                        prepared.localSnapshot.cend(),
+                                        [&](const SyncSnapshotEntry &value) {
+                                            return value.relativePath == name;
+                                        });
+        test.check(entry != prepared.localSnapshot.cend() &&
+                       entry->type == SyncEntryType::File &&
+                       entry->size == quint64(contents.size()),
+                   "a shortcut should be scanned as a file of its own size: " +
+                       name.toStdString());
+        test.check(
+            checksums.localChecksums.value(name) ==
+                QCryptographicHash::hash(contents, QCryptographicHash::Sha256),
+            "a shortcut's checksum should be its own: " + name.toStdString());
+    }
+}
+#endif
+
+OPENSCP_TEST(testScanRecordsTheSizesAndTimesQFileInfoReads, test) {
+    // Windows scans read them from the listing instead, which must agree
+    // with QFileInfo to the millisecond, or files would compare as changed.
+    QTemporaryDir localRoot;
+    const QString folder = localRoot.filePath(QStringLiteral("folder"));
+    const QString path = folder + QStringLiteral("/file.txt");
+    const QDateTime modified =
+        QDateTime::fromMSecsSinceEpoch(1'614'834'367'891, QTimeZone::utc());
+    QFile file(path);
+    test.check(QDir().mkpath(folder) && file.open(QIODevice::WriteOnly) &&
+                   file.write("12345") == 5,
+               "the scanned file should be written");
+    file.close();
+    test.check(
+        file.open(QIODevice::WriteOnly | QIODevice::Append) &&
+            file.setFileTime(modified, QFileDevice::FileModificationTime),
+        "the scanned file should get its time");
+    file.close();
+
+    RemoteOperationController remote;
+    test.check(remote.installSession(
+                   connectedClient<openscp::MockSftpClient>("sync.test")) > 0,
+               "remote controller should accept a connected session");
+    TransferManager transfers;
+    SyncCoordinator coordinator(&remote, &transfers);
+    bool ready = false;
+    SyncPreparationResult prepared;
+    QObject::connect(&coordinator, &SyncCoordinator::preparationReady,
+                     &coordinator, [&](const SyncPreparationResult &result) {
+                         prepared = result;
+                         ready = true;
+                     });
+    coordinator.start(localRoot.path(), QStringLiteral("/"));
+    test.check(waitUntil([&] { return ready; }), "the scan should complete");
+
+    const auto entry = std::find_if(
+        prepared.localSnapshot.cbegin(), prepared.localSnapshot.cend(),
+        [](const SyncSnapshotEntry &value) {
+            return value.relativePath == QStringLiteral("folder/file.txt");
+        });
+    const qint64 expected = QFileInfo(path).lastModified().toMSecsSinceEpoch();
+    test.check(entry != prepared.localSnapshot.cend() &&
+                   entry->type == SyncEntryType::File && entry->size == 5u &&
+                   entry->modifiedMs == expected &&
+                   expected == modified.toMSecsSinceEpoch(),
+               "the scan should record the file's size and time as QFileInfo "
+               "reads them");
 }
 
 OPENSCP_TEST(testAsynchronousSnapshots, test) {
@@ -285,12 +441,12 @@ OPENSCP_TEST(testAsynchronousSnapshots, test) {
 }
 
 OPENSCP_TEST(testMirrorDoesNotDeleteSkippedSourceLink, test) {
-#ifndef _WIN32
     QTemporaryDir localRoot;
     QTemporaryDir outside;
     test.check(localRoot.isValid() && outside.isValid(),
                "mirror scan fixtures should initialize");
-    test.check(QFile::link(outside.path(), localRoot.filePath("readme.txt")),
+    test.check(openscp::testsupport::createLocalLink(
+                   outside.path(), localRoot.filePath("readme.txt")),
                "source link should be created");
 
     RemoteOperationController remote;
@@ -345,7 +501,6 @@ OPENSCP_TEST(testMirrorDoesNotDeleteSkippedSourceLink, test) {
                                        QStringLiteral("readme.txt");
                             }),
                "the execution plan must also reject a stale unsafe deletion");
-#endif
 }
 
 OPENSCP_TEST(testMirrorDoesNotDeleteUnlistedRemoteSubtree, test) {
@@ -403,14 +558,89 @@ OPENSCP_TEST(testMirrorDoesNotDeleteUnlistedRemoteSubtree, test) {
                "mirror can still delete verified destination extras");
 }
 
+#ifdef _WIN32
+// Denies the current user listing a folder, as icacls /deny does, since
+// Windows has no permission bits for it, until restore() or destruction.
+class FolderListingDenied {
+    public:
+    explicit FolderListingDenied(const QString &folder)
+        : path_(QDir::toNativeSeparators(folder).toStdWString()) {
+        PACL current = nullptr;
+        if (::GetNamedSecurityInfoW(path_.c_str(), SE_FILE_OBJECT,
+                                    DACL_SECURITY_INFORMATION, nullptr, nullptr,
+                                    &current, nullptr,
+                                    &original_) != ERROR_SUCCESS)
+            return;
+        HANDLE token = nullptr;
+        if (!::OpenProcessToken(::GetCurrentProcess(), TOKEN_QUERY, &token))
+            return;
+        DWORD size = 0;
+        (void)::GetTokenInformation(token, TokenUser, nullptr, 0, &size);
+        std::vector<BYTE> user(size);
+        const bool known = ::GetTokenInformation(token, TokenUser, user.data(),
+                                                 size, &size) != 0;
+        ::CloseHandle(token);
+        if (!known)
+            return;
+        EXPLICIT_ACCESSW deny{};
+        deny.grfAccessPermissions = FILE_LIST_DIRECTORY;
+        deny.grfAccessMode = DENY_ACCESS;
+        deny.grfInheritance = NO_INHERITANCE;
+        deny.Trustee.TrusteeForm = TRUSTEE_IS_SID;
+        deny.Trustee.TrusteeType = TRUSTEE_IS_USER;
+        deny.Trustee.ptstrName = static_cast<LPWSTR>(
+            reinterpret_cast<TOKEN_USER *>(user.data())->User.Sid);
+        PACL denying = nullptr;
+        if (::SetEntriesInAclW(1, &deny, current, &denying) != ERROR_SUCCESS)
+            return;
+        originalDacl_ = current;
+        applied_ = ::SetNamedSecurityInfoW(
+                       path_.data(), SE_FILE_OBJECT, DACL_SECURITY_INFORMATION,
+                       nullptr, nullptr, denying, nullptr) == ERROR_SUCCESS;
+        ::LocalFree(denying);
+    }
+
+    ~FolderListingDenied() {
+        restore();
+        if (original_)
+            ::LocalFree(original_);
+    }
+
+    FolderListingDenied(const FolderListingDenied &) = delete;
+    FolderListingDenied &operator=(const FolderListingDenied &) = delete;
+
+    bool applied() const { return applied_; }
+
+    void restore() {
+        if (applied_) {
+            (void)::SetNamedSecurityInfoW(path_.data(), SE_FILE_OBJECT,
+                                          DACL_SECURITY_INFORMATION, nullptr,
+                                          nullptr, originalDacl_, nullptr);
+        }
+        applied_ = false;
+    }
+
+    private:
+    std::wstring path_;
+    PSECURITY_DESCRIPTOR original_ = nullptr;
+    PACL originalDacl_ = nullptr;
+    bool applied_ = false;
+};
+#endif
+
 OPENSCP_TEST(testMirrorDoesNotDeleteUnreadableLocalSubtree, test) {
-#ifndef _WIN32
     QTemporaryDir localRoot;
     test.check(localRoot.isValid(), "local mirror fixture should initialize");
     const QString locked = localRoot.filePath("home");
     test.check(QDir().mkpath(locked), "local source folder should be created");
+#ifdef _WIN32
+    FolderListingDenied denied(locked);
+    test.check(denied.applied(),
+               "local source folder should become unreadable");
+#else
     test.check(QFile::setPermissions(locked, QFileDevice::Permissions{}),
                "local source folder should become unreadable");
+#endif
 
     RemoteOperationController remote;
     test.check(remote.installSession(
@@ -427,9 +657,13 @@ OPENSCP_TEST(testMirrorDoesNotDeleteUnreadableLocalSubtree, test) {
                      });
     coordinator.start(localRoot.path(), QStringLiteral("/"));
     const bool completed = waitUntil([&] { return ready; });
+#ifdef _WIN32
+    denied.restore();
+#else
     QFile::setPermissions(locked, QFileDevice::ReadOwner |
                                       QFileDevice::WriteOwner |
                                       QFileDevice::ExeOwner);
+#endif
     test.check(completed, "scan with an unreadable local folder should finish");
     test.check(
         prepared.coverage.localUnscannedPaths.contains(QStringLiteral("home")),
@@ -453,7 +687,6 @@ OPENSCP_TEST(testMirrorDoesNotDeleteUnreadableLocalSubtree, test) {
     test.check(actionFor(QStringLiteral("readme.txt")) ==
                    SyncAction::DeleteFile,
                "unrelated verified destination extras can still be deleted");
-#endif
 }
 
 // Local files, and the mock server's tree with extra remote folders.

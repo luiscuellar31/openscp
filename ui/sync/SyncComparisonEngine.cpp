@@ -206,13 +206,20 @@ QString aliasKey(const QString &relativePath) {
     return relativePath.normalized(QString::NormalizationForm_D).toCaseFolded();
 }
 
-QSet<QString> aliasKeys(const EntryIndex &index, std::stop_token stopToken) {
+// The alias keys of `index`; `repeated` gets the ones that more than one of
+// its entries shares.
+QSet<QString> aliasKeys(const EntryIndex &index, std::stop_token stopToken,
+                        QSet<QString> &repeated) {
     QSet<QString> keys;
     keys.reserve(index.size());
     for (auto iterator = index.cbegin(); iterator != index.cend(); ++iterator) {
         if (stopToken.stop_requested())
             return {};
-        keys.insert(aliasKey(iterator.key()));
+        const QString key = aliasKey(iterator.key());
+        if (keys.contains(key))
+            repeated.insert(key);
+        else
+            keys.insert(key);
     }
     return keys;
 }
@@ -233,7 +240,8 @@ SyncComparisonItem classifyItem(const QString &relativePath,
                                 std::optional<SyncSnapshotEntry> source,
                                 std::optional<SyncSnapshotEntry> destination,
                                 const SyncComparisonOptions &options,
-                                bool sourceUnscanned, bool aliasOnOtherSide) {
+                                bool sourceUnscanned, bool aliasOnOtherSide,
+                                bool aliasInSource) {
     SyncComparisonItem item;
     item.relativePath = relativePath;
     item.source = std::move(source);
@@ -245,6 +253,15 @@ SyncComparisonItem classifyItem(const QString &relativePath,
         item.action = SyncAction::Conflict;
         item.reason = QCoreApplication::translate(
             "SyncDialog", "The other side has this name with different letter "
+                          "case or Unicode form");
+        return item;
+    }
+    // Copying both spellings could leave one entry, the second copy
+    // replacing the first.
+    if (aliasInSource) {
+        item.action = SyncAction::Conflict;
+        item.reason = QCoreApplication::translate(
+            "SyncDialog", "The source also has this name with different letter "
                           "case or Unicode form");
         return item;
     }
@@ -434,8 +451,16 @@ SyncComparisonEngine::compare(const QVector<SyncSnapshotEntry> &localSnapshot,
     const EntryIndex remote = buildEntryIndex(remoteSnapshot, stopToken);
     if (stopToken.stop_requested())
         return {};
-    const QSet<QString> localAliases = aliasKeys(local, stopToken);
-    const QSet<QString> remoteAliases = aliasKeys(remote, stopToken);
+    QSet<QString> localRepeatedAliases;
+    QSet<QString> remoteRepeatedAliases;
+    const QSet<QString> localAliases =
+        aliasKeys(local, stopToken, localRepeatedAliases);
+    const QSet<QString> remoteAliases =
+        aliasKeys(remote, stopToken, remoteRepeatedAliases);
+    const QSet<QString> &sourceRepeatedAliases =
+        options.direction == SyncDirection::LocalToRemote
+            ? localRepeatedAliases
+            : remoteRepeatedAliases;
     if (stopToken.stop_requested())
         return {};
     const QSet<QString> &unscannedPaths =
@@ -530,12 +555,17 @@ SyncComparisonEngine::compare(const QVector<SyncSnapshotEntry> &localSnapshot,
             sourcePathUnscanned(path, unscannedPaths, unscannedAncestors);
         const bool onlyRemote = localEntry == local.cend();
         const bool onlyLocal = remoteEntry == remote.cend();
+        // An entry on both sides has no alias to look for.
+        const QString alias =
+            onlyRemote || onlyLocal ? aliasKey(path) : QString();
         const bool aliasOnOtherSide =
-            (onlyRemote && localAliases.contains(aliasKey(path))) ||
-            (onlyLocal && remoteAliases.contains(aliasKey(path)));
-        result.push_back(classifyItem(path, std::move(source),
-                                      std::move(destination), options,
-                                      sourceUnscanned, aliasOnOtherSide));
+            (onlyRemote && localAliases.contains(alias)) ||
+            (onlyLocal && remoteAliases.contains(alias));
+        const bool aliasInSource =
+            source && !destination && sourceRepeatedAliases.contains(alias);
+        result.push_back(classifyItem(
+            path, std::move(source), std::move(destination), options,
+            sourceUnscanned, aliasOnOtherSide, aliasInSource));
     }
     if (stopToken.stop_requested())
         return {};
