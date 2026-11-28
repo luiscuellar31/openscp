@@ -86,6 +86,12 @@ jobs:
           PrintMotd no
           UseDNS no
           EOF
+          # OpenSSH 9.8 and later penalize an address whose connections end
+          # before logging in, as ssh-keyscan and refused host keys do, and
+          # then drop 127.0.0.1 in the middle of the tests.
+          if sudo /usr/sbin/sshd -t -f /tmp/openscp_sshd_config -o PerSourcePenalties=no 2>/dev/null; then
+            echo "PerSourcePenalties no" | sudo tee -a /tmp/openscp_sshd_config >/dev/null
+          fi
 
           sudo /usr/sbin/sshd -t -f /tmp/openscp_sshd_config
           sudo /usr/sbin/sshd -f /tmp/openscp_sshd_config \
