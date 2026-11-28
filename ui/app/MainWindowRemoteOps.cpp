@@ -211,9 +211,17 @@ void MainWindow::requestRemoteListing(const QString &path, bool refresh,
             openscpui::disableWithoutPassingFocus(rightView_) ||
             remoteViewHadFocus_;
     }
-    remoteListingMessage_ = refresh ? tr("Refreshing remote folder…")
-                                    : tr("Opening remote folder…");
-    statusBar()->showMessage(remoteListingMessage_, 0);
+    // A refresh keeps the entries usable, so it leaves another message in
+    // place, such as the result of the deletion that asked for it.
+    const QString shownMessage = statusBar()->currentMessage();
+    if (!refresh || shownMessage.isEmpty() ||
+        shownMessage == remoteListingMessage_) {
+        remoteListingMessage_ = refresh ? tr("Refreshing remote folder…")
+                                        : tr("Opening remote folder…");
+        statusBar()->showMessage(remoteListingMessage_, 0);
+    } else {
+        remoteListingMessage_.clear();
+    }
 
     RemoteOperationController::ListRequest request;
     request.path = normalized;
